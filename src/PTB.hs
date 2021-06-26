@@ -73,9 +73,3 @@ terminal = do
   word <- literal
   closeParen
   return $ Terminal (label, word)
-
--- cfgLine :: Parser CFGdata
--- cfgLine = do
---   tree <- cfgLine <|> literal
---   closeParen
---   return $ CFGdata (NonTerminal label tree)
