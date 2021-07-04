@@ -8,8 +8,7 @@ import Text.Parsec.Text --parsec
 data CFGdata = NonTerminal (T.Text, [CFGdata]) | Terminal (T.Text, T.Text) | Err String T.Text deriving (Eq, Show)
 
 printCFGdata :: [CFGdata] -> IO ()
-printCFGdata cfgData = do
-  T.putStrLn $ T.unlines $ map (formatCFGdata 0) cfgData
+printCFGdata cfgData = T.putStrLn $ T.unlines $ map (formatCFGdata 0) cfgData
 
 formatCFGdata :: Int -> CFGdata -> T.Text
 formatCFGdata depth (NonTerminal (label, tree)) =
@@ -38,7 +37,7 @@ formatCFGdata depth (Err msg text) =
 
 cfgParser :: T.Text -> CFGdata
 cfgParser text =
-  case parse ((try terminal) <|> nonterminal) "" text of
+  case parse (try terminal <|> nonterminal) "" text of
     Left e -> Err (show e) text
     Right t -> t
 
@@ -61,7 +60,7 @@ nonterminal = do
   openParen
   label <- literal
   sep
-  tree <- ((try terminal) <|> nonterminal) `sepBy1` (char ' ')
+  tree <- (try terminal <|> nonterminal) `sepBy1` char ' '
   closeParen
   return $ NonTerminal (label, tree)
 

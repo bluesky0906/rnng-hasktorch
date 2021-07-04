@@ -6,7 +6,7 @@ import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
 
 
-data Preprocess = Preprocess
+newtype Preprocess = Preprocess
   {
     path :: FilePath
   } deriving (Show)
