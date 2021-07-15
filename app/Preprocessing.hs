@@ -29,4 +29,12 @@ main = do
   content <- T.readFile $ path options
   let cfgData = map cfgParser (T.lines content)
   printCFGdata cfgData
+  let (stack, actions) = traverseCFG ([], []) (head cfgData)
+  print stack
+  print actions
+  let history = traverseCFG' [] (head cfgData)
+  print history
+  saveCFGData "test.yaml" cfgData
+  content <- loadCFGData "test.yaml"
+  print content
   return ()

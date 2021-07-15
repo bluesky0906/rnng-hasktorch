@@ -24,6 +24,9 @@ dependencies:
 - text
 - parsec
 - optparse-applicative
+- aeson
+- bytestring
+- yaml
 
 library:
   source-dirs: src

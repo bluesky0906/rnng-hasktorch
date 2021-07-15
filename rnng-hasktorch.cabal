@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: f541fd9e79e49b979554126d17848baf60fb1cd5368f75166e6c9cfe57a1e7ed
+-- hash: 97460c6b0939c2ed47418bee07e89b347334d18bda926814f80ddd8c35f63acc
 
 name:           rnng-hasktorch
 version:        0.1.0.0
@@ -33,10 +33,13 @@ library
   hs-source-dirs:
       src
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
+    , bytestring
     , optparse-applicative
     , parsec
     , text
+    , yaml
   default-language: Haskell2010
 
 executable Preprocessing
@@ -47,11 +50,14 @@ executable Preprocessing
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
+    , bytestring
     , optparse-applicative
     , parsec
     , rnng-hasktorch
     , text
+    , yaml
   default-language: Haskell2010
 
 test-suite rnng-hasktorch-test
@@ -63,9 +69,12 @@ test-suite rnng-hasktorch-test
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
+    , bytestring
     , optparse-applicative
     , parsec
     , rnng-hasktorch
     , text
+    , yaml
   default-language: Haskell2010
