@@ -1,4 +1,6 @@
 {-#  LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module PTB where
 import GHC.Generics
@@ -19,19 +21,19 @@ instance A.FromJSON CFGdata
 instance A.ToJSON CFGdata
 
 data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic)
-type Stack = [T.Text]
+type Stack = [CFGdata]
 
 instance A.FromJSON Action
 instance A.ToJSON Action
 
-newtype CFGActionData =  CFGActionData (CFGdata, Action) deriving (Eq, Show, Generic)
+newtype CFGActionData =  CFGActionData (CFGdata, [Action]) deriving (Eq, Show, Generic)
 
 instance A.FromJSON CFGActionData
 instance A.ToJSON CFGActionData
 
 
 saveCFGData :: FilePath -> [CFGActionData] -> IO()
-saveCFGData = Y.encodeFile 
+saveCFGData = Y.encodeFile
 
 loadCFGData :: FilePath -> IO [CFGActionData]
 loadCFGData filepath = do
@@ -43,32 +45,39 @@ loadCFGData filepath = do
     Right dic -> return dic
 
 
-reduce :: Stack -> T.Text -> (Stack, T.Text)
-reduce (top:rest) ans = if top == T.pack "(" 
-                          then (T.concat [T.pack "(", ans, T.pack ")"]:rest, ans)
-                          else reduce rest $ top `T.append` T.pack " " `T.append` ans
+reduce :: Stack -> T.Text -> [CFGdata] -> [CFGdata]
+reduce (NonTerminal (label, tree):rest) targetLabel child = 
+  if label == targetLabel then NonTerminal (label, child):rest
+                          else reduce rest targetLabel (NonTerminal (label, tree):child)
+reduce (top:rest) targetLabel child = reduce rest targetLabel (top:child)
+
 
 traverseCFG :: (Stack, [Action]) -> CFGdata -> (Stack, [Action])
 traverseCFG (stack, actions) (NonTerminal (label, trees)) =
-  (fst $ reduce newStack (T.pack ""), REDUCE:newActions)
-  where 
-    (newStack, newActions) = L.foldl' traverseCFG (label:T.pack "(":stack, NT label:actions)　trees 
-traverseCFG (stack, actions) (Terminal (label, word)) = (word:stack, SHIFT:actions)
-traverseCFG (stack, actions) (Err message _) = (T.pack message:stack, ERROR:actions)
+  (reduce newStack label [], REDUCE:newActions)
+  where
+    (newStack, newActions) = L.foldl' traverseCFG (NonTerminal (label, []):stack, NT label:actions) trees
+traverseCFG (stack, actions) (Terminal (label, word)) =
+  (Terminal (label, word):stack, SHIFT:actions)
+traverseCFG (stack, actions) (Err message text) = (Err message text:stack, ERROR:actions)
 
-traverseCFG' :: [(Stack, Action)] -> CFGdata -> [(Stack, Action)]
-traverseCFG' [] (NonTerminal (label, trees)) =
-  (fst $ reduce newStack (T.pack ""), REDUCE):newHistory
-  where
-    (newStack, newActions) = head newHistory
-    newHistory = L.foldl' traverseCFG' [([label, T.pack "("], NT label)]　trees 
-traverseCFG' history (NonTerminal (label, trees)) =
-  (fst $ reduce newStack (T.pack ""), REDUCE):newHistory
-  where
-    (newStack, newActions) = head newHistory
-    newHistory = L.foldl' traverseCFG' ((label:T.pack "(":fst (head history), NT label):history)　trees 
-traverseCFG' history (Terminal (label, word)) = (word:fst (head history), SHIFT):history
-traverseCFG' history (Err message _) = (T.pack message:fst (head history), ERROR):history
+traverseCFGs :: [CFGdata] -> [CFGActionData]
+traverseCFGs = map (extractTop . traverseCFG ([], []))
+  where extractTop (t::(Stack, [Action])) = CFGActionData (head $ fst t, snd t)
+
+-- traverseCFG' :: [(Stack, Action)] -> CFGdata -> [(Stack, Action)]
+-- traverseCFG' [] (NonTerminal (label, trees)) =
+--   (fst $ reduce newStack (T.pack ""), REDUCE):newHistory
+--   where
+--     (newStack, newActions) = head newHistory
+--     newHistory = L.foldl' traverseCFG' [([label, T.pack "("], NT label)]　trees 
+-- traverseCFG' history (NonTerminal (label, trees)) =
+--   (fst $ reduce newStack (T.pack ""), REDUCE):newHistory
+--   where
+--     (newStack, newActions) = head newHistory
+--     newHistory = L.foldl' traverseCFG' ((label:T.pack "(":fst (head history), NT label):history)　trees 
+-- traverseCFG' history (Terminal (label, word)) = (word:fst (head history), SHIFT):history
+-- traverseCFG' history (Err message _) = (T.pack message:fst (head history), ERROR):history
 
 printCFGdata :: [CFGdata] -> IO ()
 printCFGdata cfgData = T.putStrLn $ T.unlines $ map (formatCFGdata 0) cfgData
@@ -135,3 +144,4 @@ terminal = do
   word <- literal
   closeParen
   return $ Terminal (label, word)
+
