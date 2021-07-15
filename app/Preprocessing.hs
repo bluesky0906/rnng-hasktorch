@@ -36,4 +36,5 @@ main = do
   saveCFGDataJson "test.json" cfgActionData
   content <- loadCFGData "test.json"
   print content
+  print $ traverseCFG' [] (head cfgData)
   return ()

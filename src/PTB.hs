@@ -75,19 +75,19 @@ traverseCFGs :: [CFGdata] -> [CFGActionData]
 traverseCFGs = map (extractTop . traverseCFG ([], []))
   where extractTop (t::(Stack, [Action])) = CFGActionData (head $ fst t, snd t)
 
--- traverseCFG' :: [(Stack, Action)] -> CFGdata -> [(Stack, Action)]
--- traverseCFG' [] (NonTerminal (label, trees)) =
---   (fst $ reduce newStack (T.pack ""), REDUCE):newHistory
---   where
---     (newStack, newActions) = head newHistory
---     newHistory = L.foldl' traverseCFG' [([label, T.pack "("], NT label)]　trees 
--- traverseCFG' history (NonTerminal (label, trees)) =
---   (fst $ reduce newStack (T.pack ""), REDUCE):newHistory
---   where
---     (newStack, newActions) = head newHistory
---     newHistory = L.foldl' traverseCFG' ((label:T.pack "(":fst (head history), NT label):history)　trees 
--- traverseCFG' history (Terminal (label, word)) = (word:fst (head history), SHIFT):history
--- traverseCFG' history (Err message _) = (T.pack message:fst (head history), ERROR):history
+traverseCFG' :: [(Stack, Action)] -> CFGdata -> [(Stack, Action)]
+traverseCFG' [] (NonTerminal (label, trees)) =
+  (reduce newStack label [], REDUCE):newHistory
+  where
+    (newStack, newActions) = head newHistory
+    newHistory = L.foldl' traverseCFG' [([NonTerminal (label, trees)], NT label)]　trees 
+traverseCFG' history (NonTerminal (label, trees)) =
+  (reduce newStack label [], REDUCE):newHistory
+  where
+    (newStack, newActions) = head newHistory
+    newHistory = L.foldl' traverseCFG' ((NonTerminal (label, trees):fst (head history), NT label):history)　trees 
+traverseCFG' history (Terminal (label, word)) = (Terminal (label, word):fst (head history), SHIFT):history
+traverseCFG' history (Err message text) = ((Err message text):fst (head history), ERROR):history
 
 printCFGdata :: [CFGdata] -> IO ()
 printCFGdata cfgData = T.putStrLn $ T.unlines $ map (formatCFGdata 0) cfgData
