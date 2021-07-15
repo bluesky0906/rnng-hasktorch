@@ -8,6 +8,7 @@ import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
 import qualified Data.Aeson            as A --aeson
 import qualified Data.ByteString.Char8 as B --bytestring 
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Yaml             as Y --yaml
 import Data.List as L
 import Text.Parsec
@@ -31,6 +32,16 @@ newtype CFGActionData =  CFGActionData (CFGdata, [Action]) deriving (Eq, Show, G
 instance A.FromJSON CFGActionData
 instance A.ToJSON CFGActionData
 
+saveCFGDataJson :: FilePath -> [CFGActionData] -> IO()
+saveCFGDataJson = A.encodeFile
+
+loadCFGDataJson :: FilePath -> IO [CFGActionData]
+loadCFGDataJson filepath = do
+  content <- BL.readFile filepath
+  let parsedDic = A.eitherDecode' content
+  case parsedDic of
+    Left parse_exception -> error $ "Could not parse dic file " ++ filepath ++ ": " ++ (show parse_exception)
+    Right dic -> return dic
 
 saveCFGData :: FilePath -> [CFGActionData] -> IO()
 saveCFGData = Y.encodeFile
@@ -43,7 +54,6 @@ loadCFGData filepath = do
   case parsedDic of
     Left parse_exception -> error $ "Could not parse dic file " ++ filepath ++ ": " ++ (show parse_exception)
     Right dic -> return dic
-
 
 reduce :: Stack -> T.Text -> [CFGdata] -> [CFGdata]
 reduce (NonTerminal (label, tree):rest) targetLabel child = 

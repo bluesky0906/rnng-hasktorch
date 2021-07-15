@@ -32,4 +32,8 @@ main = do
   let cfgActionData = traverseCFGs cfgData
   saveCFGData "test.yaml" cfgActionData
   content <- loadCFGData "test.yaml"
+  print content
+  saveCFGDataJson "test.json" cfgActionData
+  content <- loadCFGData "test.json"
+  print content
   return ()
