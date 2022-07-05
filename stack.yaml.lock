@@ -3,7 +3,18 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    name: nlp-tools
+    version: 0.1.7
+    git: https://github.com/DaisukeBekki/nlp-tools.git
+    pantry-tree:
+      size: 1236
+      sha256: 722f7a9b189d5d68b3a3b9ca75089699d754c79f87648b2b1329e6a9be55c4da
+    commit: e0fac70206958ab0993bbfaca6076a3d40d32498
+  original:
+    git: https://github.com/DaisukeBekki/nlp-tools.git
+    commit: e0fac70206958ab0993bbfaca6076a3d40d32498
 snapshots:
 - completed:
     size: 585393
