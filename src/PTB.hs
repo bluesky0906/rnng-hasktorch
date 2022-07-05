@@ -8,101 +8,73 @@ import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
 import qualified Data.Aeson            as A --aeson
 import qualified Data.ByteString.Char8 as B --bytestring 
+import qualified Data.ByteString as B --bytestring 
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Yaml             as Y --yaml
 import Data.List as L
+import Debug.Trace
 import Text.Parsec
-    ( char, sepBy1, noneOf, many1, (<|>), try, parse )      --parsec
 import Text.Parsec.Text --parsec
+import Data.Store --seralisation
 
+data CFGtree = 
+  Phrase (T.Text, [CFGtree]) 
+  | Word T.Text
+  | Err String T.Text 
+  deriving (Eq, Show, Generic)
 
-data CFGdata = NonTerminal (T.Text, [CFGdata]) | Terminal (T.Text, T.Text) | Err String T.Text deriving (Eq, Show, Generic)
-
-instance A.FromJSON CFGdata
-instance A.ToJSON CFGdata
+instance A.FromJSON CFGtree
+instance A.ToJSON CFGtree
 
 data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic)
-type Stack = [CFGdata]
+type Stack = [CFGtree]
+type Words = [T.Text]
 
+instance Store Action
 instance A.FromJSON Action
 instance A.ToJSON Action
 
-newtype CFGActionData =  CFGActionData (CFGdata, [Action]) deriving (Eq, Show, Generic)
+newtype CFGActionData = CFGActionData (Words, [Action]) deriving (Eq, Show, Generic)
 
+instance Store CFGActionData
 instance A.FromJSON CFGActionData
 instance A.ToJSON CFGActionData
 
-saveCFGDataJson :: FilePath -> [CFGActionData] -> IO()
-saveCFGDataJson = A.encodeFile
 
-loadCFGDataJson :: FilePath -> IO [CFGActionData]
-loadCFGDataJson filepath = do
-  content <- BL.readFile filepath
-  let parsedDic = A.eitherDecode' content
-  case parsedDic of
-    Left parse_exception -> error $ "Could not parse dic file " ++ filepath ++ ": " ++ (show parse_exception)
-    Right dic -> return dic
+saveActionsToBinary :: FilePath -> [CFGActionData] -> IO()
+saveActionsToBinary filepath actions = B.writeFile filepath (encode actions)
 
-saveCFGData :: FilePath -> [CFGActionData] -> IO()
-saveCFGData = Y.encodeFile
-
-loadCFGData :: FilePath -> IO [CFGActionData]
-loadCFGData filepath = do
-  -- checkFile filepath
-  content <- B.readFile filepath
-  let parsedDic = Y.decodeEither' content :: Either Y.ParseException [CFGActionData]
-  case parsedDic of
-    Left parse_exception -> error $ "Could not parse dic file " ++ filepath ++ ": " ++ (show parse_exception)
-    Right dic -> return dic
-
-reduce :: Stack -> T.Text -> [CFGdata] -> [CFGdata]
-reduce (NonTerminal (label, tree):rest) targetLabel child = 
-  if label == targetLabel then NonTerminal (label, child):rest
-                          else reduce rest targetLabel (NonTerminal (label, tree):child)
-reduce (top:rest) targetLabel child = reduce rest targetLabel (top:child)
+loadActionsFromBinary :: FilePath -> IO [CFGActionData]
+loadActionsFromBinary filepath = do
+  binary <- B.readFile filepath
+  case decode binary of
+    Left peek_exception -> error $ "Could not parse dic file " ++ filepath ++ ": " ++ (show peek_exception)
+    Right actions -> return actions
 
 
-traverseCFG :: (Stack, [Action]) -> CFGdata -> (Stack, [Action])
-traverseCFG (stack, actions) (NonTerminal (label, trees)) =
-  (reduce newStack label [], REDUCE:newActions)
+traverseCFGs :: [CFGtree] -> [CFGActionData]
+traverseCFGs = map (reverseCFGActionData . traverseCFG (CFGActionData ([], [])))
+
+reverseCFGActionData :: CFGActionData -> CFGActionData
+reverseCFGActionData (CFGActionData (words, actions)) = CFGActionData ((reverse words), (reverse actions))
+
+traverseCFG :: CFGActionData -> CFGtree -> CFGActionData
+-- POSタグは無視する
+traverseCFG (CFGActionData (words, actions)) (Phrase (_, Word word:rest)) =
+  CFGActionData (word:words, SHIFT:actions)
+traverseCFG (CFGActionData (words, actions)) (Phrase (label, trees)) =
+  CFGActionData (newWords, REDUCE:newActions)
   where
-    (newStack, newActions) = L.foldl' traverseCFG (NonTerminal (label, []):stack, NT label:actions) trees
-traverseCFG (stack, actions) (Terminal (label, word)) =
-  (Terminal (label, word):stack, SHIFT:actions)
-traverseCFG (stack, actions) (Err message text) = (Err message text:stack, ERROR:actions)
+    CFGActionData (newWords, newActions) = L.foldl traverseCFG (CFGActionData (words, NT label:actions)) trees
+traverseCFG (CFGActionData (words, actions)) (Err message text)  = CFGActionData (words, ERROR:actions)
 
-traverseCFGs :: [CFGdata] -> [CFGActionData]
-traverseCFGs = map (extractTop . traverseCFG ([], []))
-  where extractTop (t::(Stack, [Action])) = CFGActionData (head $ fst t, snd t)
 
-traverseCFG' :: [(Stack, Action)] -> CFGdata -> [(Stack, Action)]
-traverseCFG' [] (NonTerminal (label, trees)) =
-  (reduce newStack label [], REDUCE):newHistory
-  where
-    (newStack, newActions) = head newHistory
-    newHistory = L.foldl' traverseCFG' [([NonTerminal (label, trees)], NT label)]　trees 
-traverseCFG' history (NonTerminal (label, trees)) =
-  (reduce newStack label [], REDUCE):newHistory
-  where
-    (newStack, newActions) = head newHistory
-    newHistory = L.foldl' traverseCFG' ((NonTerminal (label, trees):fst (head history), NT label):history)　trees 
-traverseCFG' history (Terminal (label, word)) = (Terminal (label, word):fst (head history), SHIFT):history
-traverseCFG' history (Err message text) = ((Err message text):fst (head history), ERROR):history
+printCFGtrees :: [CFGtree] -> IO ()
+printCFGtrees cfgTree = do
+  T.putStrLn $ T.unlines $ map (formatCFGtree 0) cfgTree
 
-printCFGdata :: [CFGdata] -> IO ()
-printCFGdata cfgData = T.putStrLn $ T.unlines $ map (formatCFGdata 0) cfgData
-
-formatCFGdata :: Int -> CFGdata -> T.Text
-formatCFGdata depth (NonTerminal (label, tree)) =
-  T.concat [
-    T.replicate depth (T.pack "\t"),
-    T.pack " (",
-    label,
-    T.pack "\n",
-    T.intercalate (T.pack "\n") $ map (formatCFGdata (depth + 1)) tree,
-    T.pack " )"
-  ]
-formatCFGdata depth (Terminal (label, word)) =
+formatCFGtree :: Int -> CFGtree -> T.Text
+formatCFGtree depth (Phrase (label, (Word word):rest)) =
   T.concat [
     T.replicate depth (T.pack "\t"),
     T.pack " (",
@@ -111,25 +83,61 @@ formatCFGdata depth (Terminal (label, word)) =
     word,
     T.pack " )"
   ]
-formatCFGdata depth (Err msg text) =
+formatCFGtree depth (Phrase (label, tree)) =
+  T.concat [
+    T.replicate depth (T.pack "\t"),
+    T.pack " (",
+    label,
+    T.pack "\n",
+    T.intercalate (T.pack "\n") $ map (formatCFGtree (depth + 1)) tree,
+    T.pack " )"
+  ]
+formatCFGtree depth (Err msg text) =
   T.intercalate (T.pack "\n") [
     T.pack $ "Parse Error: " ++ msg ++ " in ",
     text
   ]
 
-cfgParser :: T.Text -> CFGdata
-cfgParser text =
-  case parse (try terminal <|> nonterminal) "" text of
-    Left e -> Err (show e) text
+isErr :: CFGtree -> Bool
+isErr cfg = case cfg of
+  Word _ -> False
+  Phrase _ -> False
+  Err _ _ -> True
+
+parsePTBfile :: FilePath -> IO [CFGtree]
+parsePTBfile ptbFilePath = do
+  ptb <- T.readFile ptbFilePath
+  return $ parseCFGtrees ptb
+
+parseCFGtrees :: T.Text -> [CFGtree]
+parseCFGtrees text =
+  case parse cfgsParser "" text of
+    Left e -> [Err (show e) text]
     Right t -> t
 
-sep :: Parser ()
-sep = do
-  _ <- char ' '
+cfgsParser :: Parser [CFGtree]
+cfgsParser = do
+  _ <- optional blank
+  _ <- optional $ string copyRight
+  _ <- optional blank
+  trees <- sepBy1' cfgParser blank
+  return trees
+
+cfgParser :: Parser CFGtree
+cfgParser = do
+  openParen
+  optional blank
+  tree <- (phraseParser <|> wordParser)
+  _ <- char ')' <|> (blank >> char ')')
+  return tree
+
+blank :: Parser ()
+blank = do
+  _ <- many1 $ oneOf " \t\n"
   return ()
 
 literal :: Parser T.Text
-literal = T.pack <$> (many1 $ noneOf " ()")
+literal = T.pack <$> (many1 $ noneOf " ()\n\t")
 
 openParen :: Parser T.Text
 openParen = T.singleton <$> char '('
@@ -137,21 +145,36 @@ openParen = T.singleton <$> char '('
 closeParen :: Parser T.Text
 closeParen = T.singleton <$> char ')'
 
-nonterminal :: Parser CFGdata
-nonterminal = do
+phraseParser :: Parser CFGtree
+phraseParser = do
   openParen
   label <- literal
-  sep
-  tree <- (try terminal <|> nonterminal) `sepBy1` char ' '
-  closeParen
-  return $ NonTerminal (label, tree)
+  blank
+  tree <- (phraseParser <|> wordParser) `sepBy1'` blank
+  closeParen <|> (blank >> closeParen)
+  return $ Phrase (label, tree)
 
-terminal :: Parser CFGdata
-terminal = do
-  openParen
-  label <- literal
-  sep
+wordParser :: Parser CFGtree
+wordParser = do
   word <- literal
-  closeParen
-  return $ Terminal (label, word)
+  return $ Word word
 
+sepBy1' :: (Stream s m t) => ParsecT s u m a -> ParsecT s u m sep -> ParsecT s u m [a]
+{-# INLINABLE sepBy1' #-}
+sepBy1' p sep = do 
+  x <- p
+  xs <- many $ try (sep >> p)
+  return $ x:xs
+
+copyRight = "*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*\n\
+  \*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*\n\
+  \*x*                                                                     *x*\n\
+  \*x*            Copyright (C) 1995 University of Pennsylvania            *x*\n\
+  \*x*                                                                     *x*\n\
+  \*x*    The data in this file are part of a preliminary version of the   *x*\n\
+  \*x*    Penn Treebank Corpus and should not be redistributed.  Any       *x*\n\
+  \*x*    research using this corpus or based on it should acknowledge     *x*\n\
+  \*x*    that fact, as well as the preliminary nature of the corpus.      *x*\n\
+  \*x*                                                                     *x*\n\
+  \*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*\n\
+  \*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*"
