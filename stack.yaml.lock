@@ -5,20 +5,26 @@
 
 packages:
 - completed:
-    name: nlp-tools
-    version: 0.1.7
+    name: juman-tools
+    version: 0.1.6
     git: https://github.com/DaisukeBekki/nlp-tools.git
     pantry-tree:
-      size: 1236
-      sha256: 722f7a9b189d5d68b3a3b9ca75089699d754c79f87648b2b1329e6a9be55c4da
-    commit: e0fac70206958ab0993bbfaca6076a3d40d32498
+      size: 933
+      sha256: 3fb81f8d6974842a21f20d7ed724ff5573de7a72c759ec9259c96e4ca1c114fa
+    commit: 68005951bf12d80ade4a94a22892c203c143b911
   original:
     git: https://github.com/DaisukeBekki/nlp-tools.git
-    commit: e0fac70206958ab0993bbfaca6076a3d40d32498
+    commit: 68005951bf12d80ade4a94a22892c203c143b911
+- completed:
+    hackage: json-stream-0.4.2.4@sha256:c605847382f1f2458a09d379998ff44805a4a4fa6346ba4786fd239b23282244,4759
+    pantry-tree:
+      size: 2055
+      sha256: c8390902f25e97ed1f016bb01fde3d5e145c497b4f5f9ea0c26a8d1c58023a62
+  original:
+    hackage: json-stream-0.4.2.4
 snapshots:
 - completed:
-    size: 585393
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/0.yaml
-    sha256: c632012da648385b9fa3c29f4e0afd56ead299f1c5528ee789058be410e883c0
-  original:
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/0.yaml
+    size: 586069
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/14.yaml
+    sha256: 87842ecbaa8ca9cee59a7e6be52369dbed82ed075cb4e0d152614a627e8fd488
+  original: lts-18.14

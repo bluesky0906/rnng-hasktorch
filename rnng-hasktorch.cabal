@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: ba904843eb865b145008c4932f64ef4c95d23eabfedda90f3e1e61e08881cbf8
+-- hash: 408e9b7606bd514cbf482e8e8da07e587b304f7f6e500b458e4da867112f1361
 
 name:           rnng-hasktorch
 version:        0.1.0.0
@@ -27,7 +27,9 @@ source-repository head
 
 library
   exposed-modules:
+      Embedding
       PTB
+      Util
   other-modules:
       Paths_rnng_hasktorch
   hs-source-dirs:
@@ -36,11 +38,17 @@ library
       aeson
     , base >=4.7 && <5
     , bytestring
+    , containers
+    , dhall
     , directory
     , filepath >=1.4
-    , nlp-tools
+    , hasktorch
+    , hasktorch-tools
+    , juman-tools
     , optparse-applicative
     , parsec
+    , projectroot
+    , split
     , store
     , text
     , yaml
@@ -48,21 +56,51 @@ library
 
 executable Preprocessing
   main-is: Preprocessing.hs
-  other-modules:
-      Paths_rnng_hasktorch
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is Preprocessing
   build-depends:
       aeson
     , base >=4.7 && <5
     , bytestring
+    , containers
+    , dhall
     , directory
     , filepath >=1.4
-    , nlp-tools
+    , hasktorch
+    , hasktorch-tools
+    , juman-tools
     , optparse-applicative
     , parsec
+    , projectroot
     , rnng-hasktorch
+    , split
+    , store
+    , text
+    , yaml
+  default-language: Haskell2010
+
+executable RNNG
+  main-is: RNNG.hs
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is RNNG
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , dhall
+    , directory
+    , filepath >=1.4
+    , hasktorch
+    , hasktorch-tools
+    , juman-tools
+    , optparse-applicative
+    , parsec
+    , projectroot
+    , rnng-hasktorch
+    , split
     , store
     , text
     , yaml
@@ -80,12 +118,18 @@ test-suite rnng-hasktorch-test
       aeson
     , base >=4.7 && <5
     , bytestring
+    , containers
+    , dhall
     , directory
     , filepath >=1.4
-    , nlp-tools
+    , hasktorch
+    , hasktorch-tools
+    , juman-tools
     , optparse-applicative
     , parsec
+    , projectroot
     , rnng-hasktorch
+    , split
     , store
     , text
     , yaml

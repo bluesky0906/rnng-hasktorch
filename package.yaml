@@ -28,9 +28,15 @@ dependencies:
 - bytestring
 - yaml
 - store
-- nlp-tools
+- juman-tools
+- hasktorch
+- hasktorch-tools
+- containers
 - filepath >= 1.4
 - directory
+- dhall
+- projectroot
+- split
 
 library:
   source-dirs: src
@@ -38,13 +44,27 @@ library:
 executables:
   Preprocessing:
     main:                Preprocessing.hs
+    other-modules:       []
     source-dirs:         app
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    - -main-is Preprocessing
     dependencies:
     - rnng-hasktorch
+  RNNG:
+    main:                RNNG.hs
+    other-modules:       []
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -main-is RNNG
+    dependencies:
+    - rnng-hasktorch
+
 
 tests:
   rnng-hasktorch-test:
