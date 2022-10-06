@@ -27,24 +27,25 @@ instance A.FromJSON CFGtree
 instance A.ToJSON CFGtree
 
 data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic)
-type Stack = [CFGtree]
-type Words = [T.Text]
+type Sentence = [T.Text]
 
 instance Store Action
 instance A.FromJSON Action
 instance A.ToJSON Action
 
-newtype CFGActionData = CFGActionData (Words, [Action]) deriving (Eq, Show, Generic)
+newtype RNNGSentence = RNNGSentence (Sentence, [Action]) deriving (Eq, Show, Generic)
 
-instance Store CFGActionData
-instance A.FromJSON CFGActionData
-instance A.ToJSON CFGActionData
+instance Store RNNGSentence
+instance A.FromJSON RNNGSentence
+instance A.ToJSON RNNGSentence
 
+unpackRNNGSentence :: RNNGSentence -> (Sentence, [Action])
+unpackRNNGSentence (RNNGSentence (words, actions)) = (words, actions)
 
-saveActionsToBinary :: FilePath -> [CFGActionData] -> IO()
+saveActionsToBinary :: FilePath -> [RNNGSentence] -> IO()
 saveActionsToBinary filepath actions = B.writeFile filepath (encode actions)
 
-loadActionsFromBinary :: FilePath -> IO [CFGActionData]
+loadActionsFromBinary :: FilePath -> IO [RNNGSentence]
 loadActionsFromBinary filepath = do
   binary <- B.readFile filepath
   case decode binary of
@@ -52,21 +53,21 @@ loadActionsFromBinary filepath = do
     Right actions -> return actions
 
 
-traverseCFGs :: [CFGtree] -> [CFGActionData]
-traverseCFGs = map (reverseCFGActionData . traverseCFG (CFGActionData ([], [])))
+traverseCFGs :: [CFGtree] -> [RNNGSentence]
+traverseCFGs = map (reverseRNNGSentence . traverseCFG (RNNGSentence ([], [])))
 
-reverseCFGActionData :: CFGActionData -> CFGActionData
-reverseCFGActionData (CFGActionData (words, actions)) = CFGActionData ((reverse words), (reverse actions))
+reverseRNNGSentence :: RNNGSentence -> RNNGSentence
+reverseRNNGSentence (RNNGSentence (words, actions)) = RNNGSentence ((reverse words), (reverse actions))
 
-traverseCFG :: CFGActionData -> CFGtree -> CFGActionData
+traverseCFG :: RNNGSentence -> CFGtree -> RNNGSentence
 -- POSタグは無視する
-traverseCFG (CFGActionData (words, actions)) (Phrase (_, Word word:rest)) =
-  CFGActionData (word:words, SHIFT:actions)
-traverseCFG (CFGActionData (words, actions)) (Phrase (label, trees)) =
-  CFGActionData (newWords, REDUCE:newActions)
+traverseCFG (RNNGSentence (words, actions)) (Phrase (_, Word word:rest)) =
+  RNNGSentence (word:words, SHIFT:actions)
+traverseCFG (RNNGSentence (words, actions)) (Phrase (label, trees)) =
+  RNNGSentence (newWords, REDUCE:newActions)
   where
-    CFGActionData (newWords, newActions) = L.foldl traverseCFG (CFGActionData (words, NT label:actions)) trees
-traverseCFG (CFGActionData (words, actions)) (Err message text)  = CFGActionData (words, ERROR:actions)
+    RNNGSentence (newWords, newActions) = L.foldl traverseCFG (RNNGSentence (words, NT label:actions)) trees
+traverseCFG (RNNGSentence (words, actions)) (Err message text)  = RNNGSentence (words, ERROR:actions)
 
 
 printCFGtrees :: [CFGtree] -> IO ()
