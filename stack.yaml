@@ -35,7 +35,7 @@ extra-include-dirs:
 
   - ../.local/lib/hasktorch/deps/pytorch/torch/include
   - ../.local/lib/hasktorch/deps/pytorch/torch/csrc/api/include
-  - ../.pyenv/versions/miniforge3-4.9.2/envs/pytorch/include
+  - ../.pyenv/versions/miniconda-3.9.1/envs/pytorch/include
 
 
 extra-lib-dirs:
@@ -44,7 +44,7 @@ extra-lib-dirs:
   # - ../.local/lib/hasktorch/deps/libtokenizers/lib
 
   - ../.local/lib/hasktorch/deps/pytorch/torch/lib
-  - ../.pyenv/versions/miniforge3-4.9.2/envs/pytorch/lib
+  - ../.pyenv/versions/miniconda-3.9.1/envs/pytorch/lib
 
 extra-deps:
   - git: https://github.com/DaisukeBekki/nlp-tools.git
