@@ -19,7 +19,7 @@ extra-source-files:
 # common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/githubuser/rnng-hasktorch#readme>
 
-dependencies:
+dependencies:zw
 - base >= 4.7 && < 5
 - text
 - parsec
@@ -28,7 +28,7 @@ dependencies:
 - bytestring
 - yaml
 - store
-- juman-tools
+- nlp-tools
 - hasktorch
 - hasktorch-tools
 - containers
