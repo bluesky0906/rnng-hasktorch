@@ -53,7 +53,7 @@ extra-deps:
   - ../.local/lib/hasktorch/libtorch-ffi
   - ../.local/lib/hasktorch/libtorch-ffi-helper
   - ../.local/lib/hasktorch/hasktorch
-  - ../hasktorch-tools
+  - ../.local/lib/hasktorch-tools
   - json-stream-0.4.2.4
 
 # - acme-missiles-0.3

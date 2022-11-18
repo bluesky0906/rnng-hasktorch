@@ -37,6 +37,9 @@ dependencies:
 - dhall
 - projectroot
 - split
+- constraints
+- gnuplot
+- process
 
 library:
   source-dirs: src
@@ -64,6 +67,7 @@ executables:
     - -main-is RNNG
     dependencies:
     - rnng-hasktorch
+
 
 
 tests:

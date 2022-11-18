@@ -36,14 +36,30 @@ toWordList :: [RNNGSentence] -> [T.Text]
 toWordList [] = []
 toWordList ((RNNGSentence (words, _)):rest) = words ++ toWordList rest
 
+toActionList :: [RNNGSentence] -> [T.Text]
+toActionList [] = []
+toActionList ((RNNGSentence (_, actions)):rest) = fmap showAction actions ++ toActionList rest
+
+-- extractNT :: [Action] -> [T.Text]
+-- extractNT [] = []
+-- extractNT ((NT label):rest) = label:(extractNT rest)
+-- extractNT (_:rest) = extractNT rest
+
+-- toNTList :: [RNNGSentence] -> [T.Text]
+-- toNTList [] = []
+-- toNTList ((RNNGSentence (_, actions)):rest) = extractNT actions ++ toNTList rest
+
 buildVocab ::
   -- | training data
   [RNNGSentence] ->
   -- | 出現頻度threshold
   Int ->
+  -- | 語彙リストを作る関数
+  ([RNNGSentence] -> [T.Text])
   -- | 一意な語彙リスト
-  [T.Text]
-buildVocab actionData freq = sortWords freq (toWordList actionData)
+  -> [T.Text]
+buildVocab rnngData freq toList = sortWords freq (toList rnngData)
+
 
 indexFactory :: (Ord a, Eq a) =>
   -- | 単語列
@@ -60,10 +76,10 @@ indexFactory dic padding =
     dic_size = length dic
     factory hash wrd = M.findWithDefault 0 wrd hash
 
-actionDic :: Action -> String
-actionDic (NT _) = "NT"
-actionDic SHIFT = "SHIFT"
-actionDic REDUCE = "REDUCE"
+actionIndexFor :: Action -> Int
+actionIndexFor (NT _) = 0
+actionIndexFor SHIFT = 1
+actionIndexFor REDUCE = 2
 
 getProjectRoot :: IO (String)
 getProjectRoot = do

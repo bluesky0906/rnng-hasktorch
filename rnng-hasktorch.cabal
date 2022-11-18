@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 408e9b7606bd514cbf482e8e8da07e587b304f7f6e500b458e4da867112f1361
+-- hash: efa4de13b246d44a5d96c84196da94f544e215db0855fd9400c0844fee5058c0
 
 name:           rnng-hasktorch
 version:        0.1.0.0
@@ -29,6 +29,7 @@ library
   exposed-modules:
       Embedding
       PTB
+      RNN
       Util
   other-modules:
       Paths_rnng_hasktorch
@@ -38,15 +39,18 @@ library
       aeson
     , base >=4.7 && <5
     , bytestring
+    , constraints
     , containers
     , dhall
     , directory
     , filepath >=1.4
+    , gnuplot
     , hasktorch
     , hasktorch-tools
     , juman-tools
     , optparse-applicative
     , parsec
+    , process
     , projectroot
     , split
     , store
@@ -63,15 +67,18 @@ executable Preprocessing
       aeson
     , base >=4.7 && <5
     , bytestring
+    , constraints
     , containers
     , dhall
     , directory
     , filepath >=1.4
+    , gnuplot
     , hasktorch
     , hasktorch-tools
     , juman-tools
     , optparse-applicative
     , parsec
+    , process
     , projectroot
     , rnng-hasktorch
     , split
@@ -89,15 +96,18 @@ executable RNNG
       aeson
     , base >=4.7 && <5
     , bytestring
+    , constraints
     , containers
     , dhall
     , directory
     , filepath >=1.4
+    , gnuplot
     , hasktorch
     , hasktorch-tools
     , juman-tools
     , optparse-applicative
     , parsec
+    , process
     , projectroot
     , rnng-hasktorch
     , split
@@ -118,15 +128,18 @@ test-suite rnng-hasktorch-test
       aeson
     , base >=4.7 && <5
     , bytestring
+    , constraints
     , containers
     , dhall
     , directory
     , filepath >=1.4
+    , gnuplot
     , hasktorch
     , hasktorch-tools
     , juman-tools
     , optparse-applicative
     , parsec
+    , process
     , projectroot
     , rnng-hasktorch
     , split
