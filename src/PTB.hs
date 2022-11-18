@@ -29,6 +29,12 @@ instance A.ToJSON CFGtree
 data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic)
 type Sentence = [T.Text]
 
+showAction :: Action -> T.Text
+showAction (NT label) = (T.pack "NT_") <> label
+showAction SHIFT = T.pack "SHIFT"
+showAction REDUCE = T.pack "REDUCE"
+showAction ERROR = T.pack "ERROR"
+
 instance Store Action
 instance A.FromJSON Action
 instance A.ToJSON Action
