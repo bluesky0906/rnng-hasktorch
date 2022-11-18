@@ -5,16 +5,16 @@
 
 packages:
 - completed:
-    name: juman-tools
-    version: 0.1.6
+    name: nlp-tools
+    version: 0.1.9
     git: https://github.com/DaisukeBekki/nlp-tools.git
     pantry-tree:
-      size: 933
-      sha256: 3fb81f8d6974842a21f20d7ed724ff5573de7a72c759ec9259c96e4ca1c114fa
-    commit: 68005951bf12d80ade4a94a22892c203c143b911
+      size: 1727
+      sha256: c04b1d8be835a5b33e762fca3abbe6348dc3ac2a79e701a886b6a23f432c4731
+    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
   original:
     git: https://github.com/DaisukeBekki/nlp-tools.git
-    commit: 68005951bf12d80ade4a94a22892c203c143b911
+    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
 - completed:
     hackage: json-stream-0.4.2.4@sha256:c605847382f1f2458a09d379998ff44805a4a4fa6346ba4786fd239b23282244,4759
     pantry-tree:

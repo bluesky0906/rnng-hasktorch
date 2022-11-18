@@ -8,7 +8,7 @@ import qualified Data.Map.Strict as M
 import Data.List.Split (chunksOf, splitEvery) --split
 import Data.List as L
 import Data.Ord
-import Torch.Util.Dict (sortWords)
+import ML.Util.Dict (sortWords)
 
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
 import Dhall hiding ( map )
