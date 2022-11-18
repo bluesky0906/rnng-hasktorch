@@ -13,6 +13,7 @@
 module RNN where
 import Torch.Typed
 import qualified Torch as D
+import Data.List
 import GHC.TypeNats
 import GHC.Generics
 
@@ -77,13 +78,14 @@ rnnCellForward RNN {..} h x =
 
 -- TODO : Batch対応
 -- TODO : Tensorのままtraverse
-rnn ::
-  forall  inputSize hiddenSize dtype device.
+rnnForward ::
+  forall inputSize hiddenSize dtype device.
   ( KnownNat inputSize,
     KnownNat hiddenSize,
     KnownDType dtype,
     KnownDevice device,
     RandDTypeIsValid device dtype,
+    MatMulDTypeIsValid device dtype,
     StandardFloatingPointDTypeValidation device dtype
   ) =>
   -- | model
@@ -92,6 +94,6 @@ rnn ::
   [Tensor device dtype '[inputSize]] ->
   -- | (output, h_t)
   ([Tensor device dtype '[hiddenSize]], Tensor device dtype '[hiddenSize])
-rnn model input =
+rnnForward model input =
   let hidden = scanl (rnnCellForward model) (zeros @'[hiddenSize] @dtype @device) input
   in (tail hidden, last hidden)

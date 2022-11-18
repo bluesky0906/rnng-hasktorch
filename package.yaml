@@ -56,10 +56,10 @@ executables:
     - -main-is Preprocessing
     dependencies:
     - rnng-hasktorch
-  RNNG:
+  typed-rnng:
     main:                RNNG.hs
     other-modules:       []
-    source-dirs:         app
+    source-dirs:         app/typed
     ghc-options:
     - -threaded
     - -rtsopts
