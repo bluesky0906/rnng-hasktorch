@@ -4,9 +4,11 @@
   getEvaluationDataPath = "data/evaluation",
   getTrial = 3,
   getEpoch = 1,
-  getLstmDim = 512,
+  getActionEmbedSize = 10,
+  getWordEmbedSize = 10,
+  getHiddenSize = 10,
+  getNumLayer = 2,
   getLearningRate = 10e-2,
-  getBatchSize = 3,
   getGraphFilePath = "learning-rate.png",
   getModelFilePath = "rnng-hasktorch.model"
 }
