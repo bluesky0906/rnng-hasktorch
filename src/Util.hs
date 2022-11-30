@@ -40,14 +40,14 @@ toActionList :: [RNNGSentence] -> [T.Text]
 toActionList [] = []
 toActionList ((RNNGSentence (_, actions)):rest) = fmap showAction actions ++ toActionList rest
 
--- extractNT :: [Action] -> [T.Text]
--- extractNT [] = []
--- extractNT ((NT label):rest) = label:(extractNT rest)
--- extractNT (_:rest) = extractNT rest
+extractNT :: [Action] -> [T.Text]
+extractNT [] = []
+extractNT ((NT label):rest) = label:(extractNT rest)
+extractNT (_:rest) = extractNT rest
 
--- toNTList :: [RNNGSentence] -> [T.Text]
--- toNTList [] = []
--- toNTList ((RNNGSentence (_, actions)):rest) = extractNT actions ++ toNTList rest
+toNTList :: [RNNGSentence] -> [T.Text]
+toNTList [] = []
+toNTList ((RNNGSentence (_, actions)):rest) = extractNT actions ++ toNTList rest
 
 buildVocab ::
   -- | training data
@@ -76,11 +76,6 @@ indexFactory dic padding =
     dic_size = length dic
     factory hash wrd = M.findWithDefault 0 wrd hash
 
-actionIndexFor :: Action -> Int
-actionIndexFor (NT _) = 0
-actionIndexFor SHIFT = 1
-actionIndexFor REDUCE = 2
-
 getProjectRoot :: IO (String)
 getProjectRoot = do
   projectRoot <- getProjectRootWeightedCurrent
@@ -95,9 +90,11 @@ data Config = Config {
   getEvaluationDataPath :: String,
   getTrial :: Natural,
   getEpoch :: Natural,
-  getLstmDim :: Natural,
+  getActionEmbedSize :: Natural,
+  getWordEmbedSize :: Natural,
+  getHiddenSize :: Natural,
+  getNumLayer :: Natural,
   getLearningRate :: Double,
-  getBatchSize :: Natural,
   getGraphFilePath :: String,
   getModelFilePath :: String
   } deriving (Generic, Show)
