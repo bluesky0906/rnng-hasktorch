@@ -4,20 +4,26 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE GADTs #-}
 
-module RNNG where
+
+module TmpRNNG where
 import PTB
 import Util
-import qualified Data.Text as T 
-import Data.List.Split (chunksOf, splitEvery) --split
-import Data.List
-import Torch.Control (mapAccumM)
-import Torch.Train (update)
-import GHC.Generics
 import Torch
-import Torch.Layer.LSTM (LstmHypParams(..), LstmParams, lstmLayer)
-import Torch.Layer.BiLSTM (BiLstmHypParams(..), BiLstmParams, biLstmLayers)
+-- | hasktorch-tools
 import Torch.Layer.RNN (RNNHypParams(..), RNNParams, rnnLayer)
+import Torch.Layer.BiLSTM (BiLstmHypParams(..), BiLstmParams, biLstmLayers)
+import Torch.Layer.LSTM (LstmHypParams(..), LstmParams, lstmLayer)
 import Torch.Layer.Linear
+import Torch.Control (mapAccumM)
+import Torch.Train (update, saveParams)
+-- | nlp-tools
+import ML.Exp.Chart (drawLearningCurve)
+
+import GHC.Generics
+import qualified Data.Text as T 
+import Data.List
+import Debug.Trace
+
 
 
 data RNNGSpec = RNNGSpec {
@@ -25,24 +31,22 @@ data RNNGSpec = RNNGSpec {
   wordEmbedSize :: Int,
   actionEmbedSize :: Int,
   wordNumEmbed :: Int,
-  ntNumEmbed :: Int,
   actionNumEmbed :: Int,
   hiddenSize :: Int
 } deriving (Show, Eq)
-
 
 data RNNG where
   RNNG ::
     {
       wordEmbedding :: Parameter,
-      ntEmbedding :: Parameter,
-      actionEmbedding :: Parameter,
-      h0 :: Parameter,
-      c0 :: Parameter,
+      -- ntEmbedding :: Parameter,
+      -- actionEmbedding :: Parameter,
       bufferRNN :: RNNParams,
       actionRNN :: RNNParams,
       stackLSTM :: LstmParams,
-      compLSTM :: BiLstmParams,
+      h0 :: Parameter,
+      stackh0 :: Parameter,
+      stackc0 :: Parameter,
       w :: Parameter,
       c :: Parameter,
       linearParams :: LinearParams,
@@ -58,23 +62,62 @@ instance
     RNNGSpec
     RNNG
   where
-    sample RNNGSpec {..}  =
+    sample RNNGSpec {..} =
       RNNG
         <$> (makeIndependent =<< randnIO' [wordNumEmbed, wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [ntNumEmbed, wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [actionNumEmbed, wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
         <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
         <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
         <*> sample (LstmHypParams modelDevice hiddenSize)
-        <*> sample (BiLstmHypParams modelDevice 1 hiddenSize)
+        <*> (makeIndependent =<< randnIO' [hiddenSize])
+        <*> (makeIndependent =<< randnIO' [hiddenSize])
+        <*> (makeIndependent =<< randnIO' [hiddenSize])
         <*> (makeIndependent =<< randnIO' [hiddenSize * 3, hiddenSize])
         <*> (makeIndependent =<< randnIO' [hiddenSize])
         <*> sample (LinearHypParams modelDevice hiddenSize actionNumEmbed)
         <*> (makeIndependent =<< randnIO' [actionEmbedSize])
         <*> (makeIndependent =<< randnIO' [wordEmbedSize])
         <*> (makeIndependent =<< randnIO' [wordEmbedSize])
+
+data RNNGParseSpec = RNNGParseSpec {
+  modelDevice2 :: Device,
+  wordEmbedSize2 :: Int,
+  ntNumEmbed2 :: Int,
+  actionNumEmbed2 :: Int,
+  hiddenSize2 :: Int
+} deriving (Show, Eq)
+
+data RNNGParse where
+  RNNGParse ::
+    {
+      ntEmbedding :: Parameter,
+      actionEmbedding :: Parameter,
+      compLSTM :: BiLstmParams,
+      comph0 :: Parameter,
+      compc0 :: Parameter
+    } ->
+    RNNGParse
+  deriving (Show, Generic, Parameterized)
+
+instance
+  Randomizable
+    RNNGParseSpec
+    RNNGParse
+  where
+    sample RNNGParseSpec {..} =
+      RNNGParse
+        <$> (makeIndependent =<< randnIO' [ntNumEmbed2, wordEmbedSize2])
+        <*> (makeIndependent =<< randnIO' [actionNumEmbed2, wordEmbedSize2])
+        <*> sample (BiLstmHypParams modelDevice2 1 hiddenSize2)
+        <*> (makeIndependent =<< randnIO' [hiddenSize2])
+        <*> (makeIndependent =<< randnIO' [hiddenSize2])
+
+
+
+data IndexData = IndexData {
+    wordIndexFor :: T.Text -> Int,
+    actionIndexFor :: T.Text -> Int,
+    ntIndexFor :: T.Text -> Int
+  }
 
 data RNNGState where
   RNNGState ::
@@ -86,23 +129,8 @@ data RNNGState where
       actionHistory :: [Tensor],
       textActionHistory :: [T.Text]
     } ->
-    RNNGState deriving(Show)
-
-data IndexData where
-  IndexData ::
-    {
-      wordIndexFor :: T.Text -> Int,
-      actionIndexFor :: T.Text -> Int,
-      ntIndexFor :: T.Text -> Int
-    } ->
-    IndexData
-
-
-push ::
-  [a] ->
-  a ->
-  [a]
-push list d = list ++ [d]
+    RNNGState 
+  deriving (Show)
 
 predictNextAction ::
   RNNG ->
@@ -112,19 +140,26 @@ predictNextAction ::
   Tensor
 predictNextAction RNNG {..} RNNGState {..} = 
   let (_, b_embedding) = rnnLayer bufferRNN (toDependent $ h0) buffer
-      s_embedding = fst $ head $ lstmLayer stackLSTM (toDependent $ c0, toDependent $ h0) stack
+      s_embedding = snd $ last $ lstmLayer stackLSTM (toDependent $ stackc0, toDependent $ stackh0) stack
       (_, a_embedding) = rnnLayer actionRNN (toDependent $ h0) actionHistory
-      ut = Torch.tanh $ ((cat (Dim 0) [s_embedding, b_embedding, a_embedding]) `matmul` (toDependent w)) + (toDependent c)
+      ut = Torch.tanh $ ((cat (Dim 0) [s_embedding, b_embedding, a_embedding]) `matmul` (toDependent w) + (toDependent c))
   in logSoftmax (Dim 0) $ linearLayer linearParams ut
 
+push ::
+  [a] ->
+  a ->
+  [a]
+push list d = list ++ [d]
+
+
 parse ::
-  RNNG ->
+  RNNGParse ->
   -- | new RNNGState
   IndexData ->
   RNNGState ->
   Action ->
   RNNGState
-parse RNNG {..} IndexData {..} RNNGState {..} (NT label) =
+parse RNNGParse {..} IndexData {..} RNNGState {..} (NT label) =
   let nt_embedding = embedding' (toDependent ntEmbedding) ((asTensor . ntIndexFor) label)
       textAction = showAction (NT label)
       action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
@@ -136,7 +171,7 @@ parse RNNG {..} IndexData {..} RNNGState {..} (NT label) =
       actionHistory = push actionHistory action_embedding,
       textActionHistory = push textActionHistory  textAction
     }
-parse RNNG {..} IndexData {..} RNNGState {..} SHIFT =
+parse RNNGParse {..} IndexData {..} RNNGState {..} SHIFT =
   let textAction = showAction SHIFT
       action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
   in RNNGState {
@@ -147,14 +182,14 @@ parse RNNG {..} IndexData {..} RNNGState {..} SHIFT =
       actionHistory = push actionHistory action_embedding,
       textActionHistory = push textActionHistory textAction
     }
-parse RNNG {..} IndexData {..} RNNGState {..} REDUCE =
+parse RNNGParse {..} IndexData {..} RNNGState {..} REDUCE =
   let textAction = showAction REDUCE
       action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
       (Just idx) = findIndex (\elem -> (T.isPrefixOf (T.pack "(") elem) && not (T.isSuffixOf (T.pack ")") elem)) (reverse textStack)
       splitedIdx = (length textStack) - idx - 1
       (newTextStack, textSubTree) = splitAt splitedIdx textStack
       (newStack, subTree) = splitAt splitedIdx stack
-      composedSubTree = fst $ last $ biLstmLayers compLSTM (toDependent $ c0, toDependent $ h0) subTree
+      composedSubTree = fst $ last $ biLstmLayers compLSTM (toDependent $ compc0, toDependent $ comph0) subTree
   in RNNGState {
       stack = push newStack composedSubTree,
       textStack = push newTextStack (T.intercalate (T.pack " ") (push textSubTree (T.pack ")"))),
@@ -164,8 +199,9 @@ parse RNNG {..} IndexData {..} RNNGState {..} REDUCE =
       textActionHistory = push textActionHistory textAction
     }
 
+
 predict ::
-  RNNG ->
+  (RNNG, RNNGParse) ->
   IndexData ->
   -- | init RNNGState
   RNNGState ->
@@ -176,87 +212,79 @@ predict ::
   -- | (predicted actions, new rnngState)
   ([Tensor], RNNGState)
 predict _ _ rnngState [] results = (reverse results, rnngState)
-predict rnng indexData rnngState (action:rest) predictedHitory =
+predict (rnng, rnngParse) indexData rnngState (action:rest) predictedHitory =
   let predicted = predictNextAction rnng rnngState
-      newRNNGState = parse rnng indexData rnngState action
-  in predict rnng indexData newRNNGState rest (predicted:predictedHitory)
+      newRNNGState = parse rnngParse indexData rnngState action
+  in predict (rnng, rnngParse) indexData newRNNGState rest (predicted:predictedHitory)
 
-
-rnng ::
-  -- | model
-  RNNG ->
-  -- | input
-  RNNGSentence ->
+rnngForward ::
+  (RNNG, RNNGParse) ->
   -- | functions to convert text to index
   IndexData ->
-  -- | correct Data
-  Tensor ->
-  Tensor
-rnng RNNG {..} (RNNGSentence (sents, actions)) IndexData {..} answer =
-  let sentenceIdx = fmap (asTensor . wordIndexFor) sents
+  RNNGSentence ->
+  [Tensor]
+rnngForward (RNNG {..}, rnngParse) IndexData {..} (RNNGSentence (sents, actions)) =
+  let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . asTensor . wordIndexFor) sents
       initRNNGState = RNNGState {
         stack = [toDependent stackGuard],
         textStack = [],
-        buffer = (fmap (embedding' (toDependent wordEmbedding)) sentenceIdx) ++ [toDependent bufferGuard],
+        buffer = sentsTensor ++ [toDependent bufferGuard],
         textBuffer = sents,
         actionHistory = [toDependent actionStart],
         textActionHistory = []
       }
-      (predicted, lastState) = predict RNNG {..} IndexData {..} initRNNGState actions []
-  in nllLoss' answer (Torch.stack (Dim 0) predicted)
-
+  in fst $ predict (RNNG {..}, rnngParse) IndexData {..} initRNNGState actions []
 
 main :: IO()
 main = do
-  -- hyper parameter
+  -- experiment setting
   config <- configLoad
-  let iter = fromIntegral (getTrial config)::Int
+  let iter = fromIntegral (getEpoch config)::Int
       wordEmbedSize = fromIntegral (getWordEmbedSize config)::Int
       actionEmbedSize = fromIntegral (getActionEmbedSize config)::Int
       hiddenSize = fromIntegral (getHiddenSize config)::Int
       numLayer = fromIntegral (getNumLayer config)::Int
+      modelFilePath = getModelFilePath config
+      graphFilePath = getGraphFilePath config
+      device = Device CPU 0
+      optim = GD
   -- data
   trainingData <- loadActionsFromBinary $ getTrainingDataPath config
   validationData <- loadActionsFromBinary $ getValidationDataPath config
   evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
 
-  -- 出現頻度が3回以上の語彙に絞る
-  let (wIndexFor, wordEmbDim) = indexFactory (buildVocab evaluationData 3 toWordList) False
-      (aIndexFor, actionEmbDim) = indexFactory (buildVocab evaluationData 1 toActionList) False
-      (nIndexFor, ntEmbDim) = indexFactory (buildVocab evaluationData 1 toNTList) False
-      indexData = IndexData {
-                    wordIndexFor = wIndexFor,
-                    actionIndexFor = aIndexFor,
-                    ntIndexFor = nIndexFor
-                  }
+  let dataForTraining = evaluationData
 
-  initModel <- sample $ RNNGSpec (Device CPU 0) wordEmbedSize actionEmbedSize wordEmbDim ntEmbDim actionEmbDim hiddenSize
-  ((trainedModel, _),losses) <- mapAccumM [1..iter] (initModel, GD) $ \epoc (model,opt) -> do
-    (updated, loss) <- mapAccumM evaluationData (model, opt) $ \batch (model',opt') -> do
-      let RNNGSentence (sents, actions) = batch
-          answer = asTensor $ fmap (aIndexFor . showAction) (Data.List.take 1 actions)
-          loss = rnng initModel (RNNGSentence (Data.List.take 1 sents, Data.List.take 1 actions)) indexData answer
-      print loss
-      u <- update model' opt' loss 5e-4
-      return (u, loss)
-    return (updated, loss)
+  let (wordIndexFor, wordEmbDim) = indexFactory (buildVocab dataForTraining 3 toWordList) False
+      (actionIndexFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 1 toActionList) False
+      (ntIndexFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 1 toNTList) False
+      indexData = IndexData wordIndexFor actionIndexFor ntIndexFor
+  
+  let batches = dataForTraining
+
+  initRNNGModel <- sample $ RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim hiddenSize
+  initRNNGParseModel <- sample $ RNNGParseSpec device wordEmbedSize ntEmbDim actionEmbDim hiddenSize
+
+  (trained, losses) <- mapAccumM [1..iter] ((initRNNGModel, optim), (initRNNGParseModel, optim)) $ 
+    \epoc ((rnng, opt1), (rnngParse, opt2)) -> do
+      (updated, batchLosses) <- mapAccumM batches ((rnng, opt1), (rnngParse, opt2)) $ 
+        \batch ((rnng', opt1'), (rnngParse', opt2')) -> do
+          let RNNGSentence (sents, actions) = batch
+          print actions
+          print sents
+          let answer = asTensor $ fmap (actionIndexFor . showAction) actions
+              output = rnngForward (rnng', rnngParse') indexData (RNNGSentence (sents, actions))
+              loss = nllLoss' answer (Torch.stack (Dim 0) output)
+          updatedRNNG <- runStep rnng' opt1' loss 1e-2
+          updatedRNNGParse <- runStep rnngParse' opt2' loss 1e-2
+          return ((updatedRNNG, updatedRNNGParse), (asValue loss::Float))
+
+      let loss = sum batchLosses / (fromIntegral (length batches)::Float)
+      return (updated, loss)
+
+  let ((rnngModel, _), (rnngParseModel, _)) = trained
+  Torch.Train.saveParams rnngModel (modelFilePath ++ "-rnng")
+  Torch.Train.saveParams rnngParseModel (modelFilePath ++ "-rnng-parse")
+  drawLearningCurve graphFilePath "Learning Curve" [("", reverse losses)]
+  print losses
   return ()
-
-{-
-config <- configLoad
-wordEmbedSize = fromIntegral (getWordEmbedSize config)::Int
-actionEmbedSize = fromIntegral (getActionEmbedSize config)::Int
-hiddenSize = fromIntegral (getHiddenSize config)::Int
-evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
-
-vocab = buildVocab evaluationData 3
-(wIndexFor, wordEmbDim) = indexFactory (buildVocab evaluationData 3 toWordList) False
-(aIndexFor, actionEmbDim) = indexFactory (buildVocab evaluationData 1 toActionList) False
-(nIndexFor, ntEmbDim) = indexFactory (buildVocab evaluationData 1 toNTList) False
-
-initModel <- sample $ RNNGSpec (Device CPU 0) wordEmbedSize actionEmbedSize wordEmbDim ntEmbDim actionEmbDim hiddenSize
-indexData = IndexData {wordIndexFor = wIndexFor, actionIndexFor = aIndexFor, ntIndexFor = nIndexFor}
-RNNGSentence (sents, actions) = (head evaluationData) 
-answer =  asTensor $ fmap (aIndexFor . showAction) actions
-loss = rnng initModel (head evaluationData) indexData answer
--}
