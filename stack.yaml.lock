@@ -5,26 +5,45 @@
 
 packages:
 - completed:
+    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
+    git: https://github.com/DaisukeBekki/nlp-tools.git
     name: nlp-tools
-    version: 0.1.9
-    git: https://github.com/DaisukeBekki/nlp-tools.git
     pantry-tree:
-      size: 1727
       sha256: c04b1d8be835a5b33e762fca3abbe6348dc3ac2a79e701a886b6a23f432c4731
-    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
+      size: 1727
+    version: 0.1.9
   original:
+    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
     git: https://github.com/DaisukeBekki/nlp-tools.git
-    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
 - completed:
-    hackage: json-stream-0.4.2.4@sha256:c605847382f1f2458a09d379998ff44805a4a4fa6346ba4786fd239b23282244,4759
+    commit: 2d0fe9b2f0aa0e1aefc7bfed95a501e59486afb0
+    git: https://github.com/fpco/inline-c
+    name: inline-c
     pantry-tree:
-      size: 2055
-      sha256: c8390902f25e97ed1f016bb01fde3d5e145c497b4f5f9ea0c26a8d1c58023a62
+      sha256: 1c0c27a2df1c09003147fd2e6082ff4b48aeab3acd4a77a3a4d4fb16c6d65ac2
+      size: 1309
+    subdir: inline-c
+    version: 0.9.1.5
   original:
-    hackage: json-stream-0.4.2.4
+    commit: 2d0fe9b2f0aa0e1aefc7bfed95a501e59486afb0
+    git: https://github.com/fpco/inline-c
+    subdir: inline-c
+- completed:
+    commit: 2d0fe9b2f0aa0e1aefc7bfed95a501e59486afb0
+    git: https://github.com/fpco/inline-c
+    name: inline-c-cpp
+    pantry-tree:
+      sha256: f0513d05b29a956b19189b6a14a930582e768ddc3967743f82fe5417169738e0
+      size: 1007
+    subdir: inline-c-cpp
+    version: 0.5.0.0
+  original:
+    commit: 2d0fe9b2f0aa0e1aefc7bfed95a501e59486afb0
+    git: https://github.com/fpco/inline-c
+    subdir: inline-c-cpp
 snapshots:
 - completed:
-    size: 586069
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/14.yaml
-    sha256: 87842ecbaa8ca9cee59a7e6be52369dbed82ed075cb4e0d152614a627e8fd488
-  original: lts-18.14
+    sha256: d3ba2e94c3ccbd3da4949243c83b59667c5eb9ffc7646148661c16741bbad1d4
+    size: 643623
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/nightly/2022/10/11.yaml
+  original: nightly-2022-10-11
