@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: cf6276564862162a861f3a6a83f1b570ba83fcbbc95d1507110d23ec2c18b44d
+-- hash: 98737263177cb2daf00ffca98c1d7cc082098c9917b4492b57190eece9bc1b47
 
 name:           rnng-hasktorch
 version:        0.1.0.0
@@ -91,35 +91,6 @@ executable RNNG
   hs-source-dirs:
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is RNNG
-  build-depends:
-      aeson
-    , base >=4.7 && <5
-    , bytestring
-    , constraints
-    , containers
-    , dhall
-    , directory
-    , filepath >=1.4
-    , gnuplot
-    , hasktorch
-    , hasktorch-tools
-    , nlp-tools
-    , optparse-applicative
-    , parsec
-    , process
-    , projectroot
-    , rnng-hasktorch
-    , split
-    , store
-    , text
-    , yaml
-  default-language: Haskell2010
-
-executable tmpRNNG
-  main-is: TmpRNNG.hs
-  hs-source-dirs:
-      app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is TmpRNNG
   build-depends:
       aeson
     , base >=4.7 && <5

@@ -5,7 +5,7 @@
 {-# LANGUAGE GADTs #-}
 
 
-module TmpRNNG where
+module RNNG where
 import PTB
 import Util
 import Torch
@@ -253,7 +253,7 @@ main = do
   validationData <- loadActionsFromBinary $ getValidationDataPath config
   evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
 
-  let dataForTraining = evaluationData
+  let dataForTraining = trainingData
 
   let (wordIndexFor, wordEmbDim) = indexFactory (buildVocab dataForTraining 3 toWordList) False
       (actionIndexFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 1 toActionList) False
