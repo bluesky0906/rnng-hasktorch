@@ -227,8 +227,13 @@ predict Eval (rnng, rnngParse) IndexData {..} _ predictedHitory RNNGState {..} =
   else
     let predicted = predictNextAction rnng RNNGState {..}
         action = indexActionFor (asValue (argmax (Dim 0) RemoveDim predicted)::Int)
-        newRNNGState = parse rnngParse IndexData {..} RNNGState {..} action
-    in predict Eval (rnng, rnngParse) IndexData {..}  [] (predicted:predictedHitory) newRNNGState
+    -- 不正なactionを予測した場合
+    -- TODO: valid　actionのみに絞る
+    in if (action == REDUCE && (length textStack == 1)) || (action == SHIFT && (length textBuffer) == 0)
+         then (reverse predictedHitory, RNNGState {..} )
+       else
+         let newRNNGState = parse rnngParse IndexData {..} RNNGState {..} action
+         in predict Eval (rnng, rnngParse) IndexData {..}  [] (predicted:predictedHitory) newRNNGState
 
 rnngForward ::
   RuntimeMode ->
@@ -256,19 +261,28 @@ evaluate ::
   -- | action answers
   [[Action]] ->
   -- | (accuracy, loss, predicted action sequence)
-  (Float, Float, [[Action]])
+  ([Float], Float, [[Action]])
 evaluate (rnng, rnngParse) IndexData {..} batches answers =
-  let (acc, loss, ans) = foldLoop (zip batches answers) (0, 0, []) $ 
+  let (acc, loss, ans) = foldLoop (zip batches answers) ([], 0, []::[[Action]]) $ 
         \(batch, answerActions) (acc', loss', ans') ->
           let answer = asTensor $ fmap actionIndexFor answerActions
               output = rnngForward Eval (rnng, rnngParse) IndexData {..} batch
-              predicted = fmap (argmax (Dim 0) RemoveDim) output 
-              batchLoss = asValue (nllLoss' answer (Torch.stack (Dim 0) output))::Float
-              accuracy = asValue (sumAll $ eq answer (Torch.stack (Dim 0) $ predicted))::Float
-              predictedActions = fmap (indexActionFor . asValue) predicted
-          in (acc' + accuracy, loss' + batchLoss, predictedActions:ans')
+              predicted = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output 
+              predictedSize = shape predicted !! 0
+              answerSize = shape answer !! 0
+              alignedPredicted = if predictedSize < answerSize
+                            then cat (Dim 0) [predicted, asTensor ((replicate (answerSize - predictedSize) (-1))::[Int])]
+                            else predicted
+              alignedAnswer = if predictedSize > answerSize
+                            then cat (Dim 0) [answer, asTensor ((replicate (predictedSize - answerSize) (-1))::[Int])]
+                            else answer
+              numCorrect = asValue (sumAll $ eq alignedAnswer alignedPredicted)::Int
+              accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictedSize)::Float
+              batchLoss = asValue (nllLoss' alignedAnswer (Torch.stack (Dim 0) output))::Float
+              predictedActions = fmap indexActionFor (asValue predicted::[Int])
+          in (accuracy:acc', loss' + (Debug.Trace.traceShow batchLoss batchLoss), predictedActions:ans')
       size = fromIntegral (length batches)::Float
-  in (acc/size, loss/size, ans)
+  in (acc, loss/size, ans)
 
 
 main :: IO()
@@ -296,7 +310,7 @@ main = do
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 1 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
   
-  let batches = dataForTraining
+  let batches = Data.List.take 1 dataForTraining
       rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim hiddenSize
       rnngParseSpec = RNNGParseSpec device wordEmbedSize ntEmbDim actionEmbDim hiddenSize
   initRNNGModel <- sample $ rnngSpec
@@ -338,6 +352,7 @@ main = do
 
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
       (acc, loss, predicted) = evaluate (rnngModel, rnngParseModel) indexData evaluationData answers
-  print $ "acc: " ++ show acc
+  
+  print $ "acc: " ++ show (sum acc / (fromIntegral (length acc)::Float))
   print $ "loss: " ++ show loss
   return ()
