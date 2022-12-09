@@ -270,15 +270,18 @@ evaluate (rnng, rnngParse) IndexData {..} batches answers =
               predicted = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output 
               predictedSize = shape predicted !! 0
               answerSize = shape answer !! 0
+              alignedOutput = if predictedSize < answerSize
+                                  then output ++ replicate (answerSize - predictedSize) (zeros' [shape (head output) !! 0])
+                                  else output 
               alignedPredicted = if predictedSize < answerSize
-                            then cat (Dim 0) [predicted, asTensor ((replicate (answerSize - predictedSize) (-1))::[Int])]
-                            else predicted
+                                  then cat (Dim 0) [predicted, asTensor ((replicate (answerSize - predictedSize) (-1))::[Int])]
+                                  else predicted
               alignedAnswer = if predictedSize > answerSize
-                            then cat (Dim 0) [answer, asTensor ((replicate (predictedSize - answerSize) (-1))::[Int])]
-                            else answer
+                                then cat (Dim 0) [answer, asTensor ((replicate (predictedSize - answerSize) (-1))::[Int])]
+                                else answer
               numCorrect = asValue (sumAll $ eq alignedAnswer alignedPredicted)::Int
               accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictedSize)::Float
-              batchLoss = asValue (nllLoss' alignedAnswer (Torch.stack (Dim 0) output))::Float
+              batchLoss = asValue (nllLoss' alignedAnswer (Torch.stack (Dim 0) alignedOutput))::Float
               predictedActions = fmap indexActionFor (asValue predicted::[Int])
           in (accuracy:acc', loss' + (Debug.Trace.traceShow batchLoss batchLoss), predictedActions:ans')
       size = fromIntegral (length batches)::Float
@@ -309,7 +312,7 @@ main = do
       (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 1 toActionList) ERROR Nothing
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 1 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
-  
+
   let batches = Data.List.take 1 dataForTraining
       rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim hiddenSize
       rnngParseSpec = RNNGParseSpec device wordEmbedSize ntEmbDim actionEmbDim hiddenSize
