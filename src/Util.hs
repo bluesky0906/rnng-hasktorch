@@ -36,9 +36,9 @@ toWordList :: [RNNGSentence] -> [T.Text]
 toWordList [] = []
 toWordList ((RNNGSentence (words, _)):rest) = words ++ toWordList rest
 
-toActionList :: [RNNGSentence] -> [T.Text]
+toActionList :: [RNNGSentence] -> [Action]
 toActionList [] = []
-toActionList ((RNNGSentence (_, actions)):rest) = fmap showAction actions ++ toActionList rest
+toActionList ((RNNGSentence (_, actions)):rest) = actions ++ toActionList rest
 
 extractNT :: [Action] -> [T.Text]
 extractNT [] = []
@@ -49,32 +49,36 @@ toNTList :: [RNNGSentence] -> [T.Text]
 toNTList [] = []
 toNTList ((RNNGSentence (_, actions)):rest) = extractNT actions ++ toNTList rest
 
-buildVocab ::
+buildVocab :: 
+  (Ord a) =>
   -- | training data
   [RNNGSentence] ->
   -- | 出現頻度threshold
   Int ->
   -- | 語彙リストを作る関数
-  ([RNNGSentence] -> [T.Text])
+  ([RNNGSentence] -> [a])
   -- | 一意な語彙リスト
-  -> [T.Text]
+  -> [a]
 buildVocab rnngData freq toList = sortWords freq (toList rnngData)
 
 
 indexFactory :: (Ord a, Eq a) =>
   -- | 単語列
   [a] ->
-  -- | paddingをindexに含むか否か(含む場合は1がpadding idx)
-  Bool ->
-  -- | 単語のindexを返す関数（未知語は0）, リストのサイズ
-  (a -> Int, Int)
-indexFactory dic padding =
+  -- | 未知語を表すa型の要素(idxは0)
+  a ->
+  -- | paddingを表すa型の要素(含む場合は1がpadding idx)
+  Maybe a ->
+  -- | 単語のindexを返す関数（未知語は0）, indexから単語を返す関数, リストのサイズ
+  (a -> Int, Int -> a, Int)
+indexFactory dic unk padding =
   case padding of
-    False -> (factory (M.fromList (zip dic [1..])), dic_size + 1)
-    True -> (factory (M.fromList (zip dic [2..])), dic_size + 2)
+    Nothing -> (wordToIndexFactory (M.fromList (zip dic [1..])), indexToWordFactory (M.fromList (zip [0..] (unk:dic))), dic_size + 1)
+    (Just pad) -> (wordToIndexFactory (M.fromList (zip dic [2..])), indexToWordFactory (M.fromList (zip [0..] (unk:pad:dic))), dic_size + 2)
   where
     dic_size = length dic
-    factory hash wrd = M.findWithDefault 0 wrd hash
+    wordToIndexFactory map wrd = M.findWithDefault 0 wrd map
+    indexToWordFactory map idx = M.findWithDefault unk idx map
 
 getProjectRoot :: IO (String)
 getProjectRoot = do

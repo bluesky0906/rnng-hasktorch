@@ -3,7 +3,7 @@
   getValidationDataPath = "data/validation",
   getEvaluationDataPath = "data/evaluation",
   getTrial = 3,
-  getEpoch = 1,
+  getEpoch = 10,
   getActionEmbedSize = 5,
   getWordEmbedSize = 5,
   getHiddenSize = 5,
