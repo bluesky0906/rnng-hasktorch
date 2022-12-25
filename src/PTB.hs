@@ -26,7 +26,7 @@ data CFGtree =
 instance A.FromJSON CFGtree
 instance A.ToJSON CFGtree
 
-data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic)
+data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic, Ord)
 type Sentence = [T.Text]
 
 showAction :: Action -> T.Text
