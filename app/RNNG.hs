@@ -32,29 +32,57 @@ data RNNGSpec = RNNGSpec {
   actionEmbedSize :: Int,
   wordNumEmbed :: Int,
   actionNumEmbed :: Int,
+  ntNumEmbed :: Int,
   hiddenSize :: Int
 } deriving (Show, Eq)
+
+
+data PredictActionRNNG where
+  PredictActionRNNG :: {
+    wordEmbedding :: Parameter,
+    bufferRNN :: RNNParams,
+    actionRNN :: RNNParams,
+    stackLSTM :: LstmParams,
+    h0 :: Parameter,
+    stackh0 :: Parameter,
+    stackc0 :: Parameter,
+    w :: Parameter,
+    c :: Parameter,
+    linearParams :: LinearParams,
+    actionStart :: Parameter, -- dummy for empty action history
+    bufferGuard :: Parameter, -- dummy for empty buffer
+    stackGuard :: Parameter  -- dummy for empty stack
+    } ->
+    PredictActionRNNG
+  deriving (Show, Generic, Parameterized)
 
 data RNNG where
   RNNG ::
     {
-      wordEmbedding :: Parameter,
-      -- ntEmbedding :: Parameter,
-      -- actionEmbedding :: Parameter,
-      bufferRNN :: RNNParams,
-      actionRNN :: RNNParams,
-      stackLSTM :: LstmParams,
-      h0 :: Parameter,
-      stackh0 :: Parameter,
-      stackc0 :: Parameter,
-      w :: Parameter,
-      c :: Parameter,
-      linearParams :: LinearParams,
-      actionStart :: Parameter, -- dummy for empty action history
-      bufferGuard :: Parameter, -- dummy for empty buffer
-      stackGuard :: Parameter  -- dummy for empty stack
+      predictActionRNNG :: PredictActionRNNG,
+      parseRNNG :: ParseRNNG,
+      compRNNG :: CompRNNG
     } ->
     RNNG
+  deriving (Show, Generic, Parameterized)
+
+data ParseRNNG where
+  ParseRNNG ::
+    {
+      ntEmbedding :: Parameter,
+      actionEmbedding :: Parameter
+    } ->
+    ParseRNNG
+  deriving (Show, Generic, Parameterized)
+
+data CompRNNG where
+  CompRNNG ::
+    {
+      compLSTM :: BiLstmParams,
+      comph0 :: Parameter,
+      compc0 :: Parameter
+    } ->
+    CompRNNG
   deriving (Show, Generic, Parameterized)
 
 instance
@@ -62,8 +90,8 @@ instance
     RNNGSpec
     RNNG
   where
-    sample RNNGSpec {..} =
-      RNNG
+    sample RNNGSpec {..} = do
+      predictActionRNNG <- PredictActionRNNG
         <$> (makeIndependent =<< randnIO' [wordNumEmbed, wordEmbedSize])
         <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
         <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
@@ -77,39 +105,15 @@ instance
         <*> (makeIndependent =<< randnIO' [actionEmbedSize])
         <*> (makeIndependent =<< randnIO' [wordEmbedSize])
         <*> (makeIndependent =<< randnIO' [wordEmbedSize])
+      parseRNNG <- ParseRNNG
+        <$> (makeIndependent =<< randnIO' [ntNumEmbed, wordEmbedSize])
+        <*> (makeIndependent =<< randnIO' [actionNumEmbed, wordEmbedSize])
+      compRNNG <- CompRNNG
+        <$> sample (BiLstmHypParams modelDevice 1 hiddenSize)
+        <*> (makeIndependent =<< randnIO' [hiddenSize])
+        <*> (makeIndependent =<< randnIO' [hiddenSize])
+      return $ RNNG predictActionRNNG parseRNNG compRNNG
 
-data RNNGParseSpec = RNNGParseSpec {
-  modelDevice2 :: Device,
-  wordEmbedSize2 :: Int,
-  ntNumEmbed2 :: Int,
-  actionNumEmbed2 :: Int,
-  hiddenSize2 :: Int
-} deriving (Show, Eq)
-
-data RNNGParse where
-  RNNGParse ::
-    {
-      ntEmbedding :: Parameter,
-      actionEmbedding :: Parameter,
-      compLSTM :: BiLstmParams,
-      comph0 :: Parameter,
-      compc0 :: Parameter
-    } ->
-    RNNGParse
-  deriving (Show, Generic, Parameterized)
-
-instance
-  Randomizable
-    RNNGParseSpec
-    RNNGParse
-  where
-    sample RNNGParseSpec {..} =
-      RNNGParse
-        <$> (makeIndependent =<< randnIO' [ntNumEmbed2, wordEmbedSize2])
-        <*> (makeIndependent =<< randnIO' [actionNumEmbed2, wordEmbedSize2])
-        <*> sample (BiLstmHypParams modelDevice2 1 hiddenSize2)
-        <*> (makeIndependent =<< randnIO' [hiddenSize2])
-        <*> (makeIndependent =<< randnIO' [hiddenSize2])
 
 
 data IndexData = IndexData {
@@ -140,7 +144,7 @@ predictNextAction ::
   RNNGState ->
   -- | possibility of actions
   Tensor
-predictNextAction RNNG {..} RNNGState {..} = 
+predictNextAction (RNNG PredictActionRNNG {..} _ _) RNNGState {..} = 
   let (_, b_embedding) = rnnLayer bufferRNN (toDependent $ h0) buffer
       s_embedding = snd $ last $ lstmLayer stackLSTM (toDependent $ stackc0, toDependent $ stackh0) stack
       (_, a_embedding) = rnnLayer actionRNN (toDependent $ h0) actionHistory
@@ -156,13 +160,13 @@ push list d = list ++ [d]
 
 parse ::
   -- | model
-  RNNGParse ->
+  RNNG ->
   IndexData ->
   -- | new RNNGState
   RNNGState ->
   Action ->
   RNNGState
-parse RNNGParse {..} IndexData {..} RNNGState {..} (NT label) =
+parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
   let nt_embedding = embedding' (toDependent ntEmbedding) ((asTensor . ntIndexFor) label)
       textAction = NT label
       action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
@@ -174,7 +178,7 @@ parse RNNGParse {..} IndexData {..} RNNGState {..} (NT label) =
       actionHistory = push actionHistory action_embedding,
       textActionHistory = push textActionHistory  textAction
     }
-parse RNNGParse {..} IndexData {..} RNNGState {..} SHIFT =
+parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
   let textAction = SHIFT
       action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
   in RNNGState {
@@ -185,7 +189,7 @@ parse RNNGParse {..} IndexData {..} RNNGState {..} SHIFT =
       actionHistory = push actionHistory action_embedding,
       textActionHistory = push textActionHistory textAction
     }
-parse RNNGParse {..} IndexData {..} RNNGState {..} REDUCE =
+parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
   let textAction = REDUCE
       action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
       (Just idx) = findIndex (\elem -> (T.isPrefixOf (T.pack "(") elem) && not (T.isSuffixOf (T.pack ")") elem)) (reverse textStack)
@@ -205,7 +209,7 @@ parse RNNGParse {..} IndexData {..} RNNGState {..} REDUCE =
 
 predict ::
   RuntimeMode ->
-  (RNNG, RNNGParse) ->
+  RNNG ->
   IndexData ->
   -- | actions
   [Action] ->
@@ -216,12 +220,12 @@ predict ::
   -- | (predicted actions, new rnngState)
   ([Tensor], RNNGState)
 predict Train _ _ [] results rnngState = (reverse results, rnngState)
-predict Train (rnng, rnngParse) indexData (action:rest) predictedHitory rnngState =
+predict Train rnng indexData (action:rest) predictedHitory rnngState =
   let predicted = predictNextAction rnng rnngState
-      newRNNGState = parse rnngParse indexData rnngState action
-  in predict Train (rnng, rnngParse) indexData rest (predicted:predictedHitory) newRNNGState
+      newRNNGState = parse rnng indexData rnngState action
+  in predict Train rnng indexData rest (predicted:predictedHitory) newRNNGState
 
-predict Eval (rnng, rnngParse) IndexData {..} _ predictedHitory RNNGState {..} =
+predict Eval rnng IndexData {..} _ predictedHitory RNNGState {..} =
   if ((length textStack) == 1) && ((length textBuffer) == 0)
     then (reverse predictedHitory, RNNGState {..} )
   else
@@ -232,17 +236,17 @@ predict Eval (rnng, rnngParse) IndexData {..} _ predictedHitory RNNGState {..} =
     in if (action == REDUCE && (length textStack == 1)) || (action == SHIFT && (length textBuffer) == 0)
          then (reverse predictedHitory, RNNGState {..} )
        else
-         let newRNNGState = parse rnngParse IndexData {..} RNNGState {..} action
-         in predict Eval (rnng, rnngParse) IndexData {..}  [] (predicted:predictedHitory) newRNNGState
+         let newRNNGState = parse rnng IndexData {..} RNNGState {..} action
+         in predict Eval rnng IndexData {..}  [] (predicted:predictedHitory) newRNNGState
 
 rnngForward ::
   RuntimeMode ->
-  (RNNG, RNNGParse) ->
+  RNNG ->
   -- | functions to convert text to index
   IndexData ->
   RNNGSentence ->
   [Tensor]
-rnngForward runTimeMode (RNNG {..}, rnngParse) IndexData {..} (RNNGSentence (sents, actions)) =
+rnngForward runTimeMode (RNNG PredictActionRNNG {..} parseRNNG compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
   let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . asTensor . wordIndexFor) sents
       initRNNGState = RNNGState {
         stack = [toDependent stackGuard],
@@ -252,21 +256,21 @@ rnngForward runTimeMode (RNNG {..}, rnngParse) IndexData {..} (RNNGSentence (sen
         actionHistory = [toDependent actionStart],
         textActionHistory = []
       }
-  in fst $ predict runTimeMode (RNNG {..}, rnngParse) IndexData {..} actions [] initRNNGState
+  in fst $ predict runTimeMode (RNNG PredictActionRNNG {..} parseRNNG compRNNG) IndexData {..} actions [] initRNNGState
 
 evaluate ::
-  (RNNG, RNNGParse) ->
+  RNNG ->
   IndexData ->
   [RNNGSentence] ->
   -- | action answers
   [[Action]] ->
   -- | (accuracy, loss, predicted action sequence)
   ([Float], Float, [[Action]])
-evaluate (rnng, rnngParse) IndexData {..} batches answers =
+evaluate rnng IndexData {..} batches answers =
   let (acc, loss, ans) = foldLoop (zip batches answers) ([], 0, []::[[Action]]) $ 
         \(batch, answerActions) (acc', loss', ans') ->
           let answer = asTensor $ fmap actionIndexFor answerActions
-              output = rnngForward Eval (rnng, rnngParse) IndexData {..} batch
+              output = rnngForward Eval rnng IndexData {..} batch
               predicted = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output 
               predictedSize = shape predicted !! 0
               answerSize = shape answer !! 0
@@ -283,7 +287,7 @@ evaluate (rnng, rnngParse) IndexData {..} batches answers =
               accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictedSize)::Float
               batchLoss = asValue (nllLoss' alignedAnswer (Torch.stack (Dim 0) alignedOutput))::Float
               predictedActions = fmap indexActionFor (asValue predicted::[Int])
-          in (accuracy:acc', loss' + (Debug.Trace.traceShow batchLoss batchLoss), predictedActions:ans')
+          in (accuracy:acc', loss' + batchLoss, predictedActions:ans')
       size = fromIntegral (length batches)::Float
   in (acc, loss/size, ans)
 
@@ -313,40 +317,40 @@ main = do
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 1 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
 
-  let batches = Data.List.take 1 dataForTraining
-      rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim hiddenSize
-      rnngParseSpec = RNNGParseSpec device wordEmbedSize ntEmbDim actionEmbDim hiddenSize
+  let batches = Data.List.take 100 dataForTraining
+      rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
   initRNNGModel <- sample $ rnngSpec
-  initRNNGParseModel <- sample $ rnngParseSpec
 
   -- | training
-  (trained, losses) <- mapAccumM [1..iter] ((initRNNGModel, optim), (initRNNGParseModel, optim)) $ 
-    \epoc ((rnng, opt1), (rnngParse, opt2)) -> do
-      (updated, batchLosses) <- mapAccumM batches ((rnng, opt1), (rnngParse, opt2)) $ 
-        \batch ((rnng', opt1'), (rnngParse', opt2')) -> do
+  ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
+    \epoc (rnng, (opt1, opt2, opt3)) -> do
+      (updated, batchLosses) <- mapAccumM batches (rnng, (opt1, opt2, opt3)) $ 
+        \batch (rnng', (opt1', opt2', opt3')) -> do
           let RNNGSentence (sents, actions) = batch
           print actions
           print sents
           let answer = asTensor $ fmap actionIndexFor actions
-              output = rnngForward Train (rnng', rnngParse') indexData (RNNGSentence (sents, actions))
+              output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
               loss = nllLoss' answer (Torch.stack (Dim 0) output)
-          updatedRNNG <- runStep rnng' opt1' loss 1e-2
-          updatedRNNGParse <- runStep rnngParse' opt2' loss 1e-2
-          return ((updatedRNNG, updatedRNNGParse), (asValue loss::Float))
+              RNNG actionPredictRNNG parseRNNG compRNNG = rnng'
+          (updatedActionPredictRNNG, opt1'') <- runStep actionPredictRNNG opt1' loss 1e-2
+          (updatedParseRNNG, opt2'') <- runStep parseRNNG opt2' loss 1e-2
+          (updatedcompRNNG, opt3'') <- if length (filter (== REDUCE) actions) > 1
+                                         then runStep compRNNG opt3' loss 1e-2
+                                       else return (compRNNG, opt3')
+          -- updatedParse <- runStep rnngParse opt' loss 1e-2
+          return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedcompRNNG, (opt1'', opt2'', opt3'')), (asValue loss::Float))
 
       let loss = sum batchLosses / (fromIntegral (length batches)::Float)
       return (updated, loss)
 
   -- | model保存
-  let ((rnngModel, _), (rnngParseModel, _)) = trained
-  Torch.Train.saveParams rnngModel (modelFilePath ++ "-rnng")
-  Torch.Train.saveParams rnngParseModel (modelFilePath ++ "-rnng-parse")
+  Torch.Train.saveParams trained (modelFilePath ++ "-rnng")
   drawLearningCurve graphFilePath "Learning Curve" [("", reverse losses)]
   print losses
   
   -- | model読み込み
   rnngModel <- Torch.Train.loadParams rnngSpec (modelFilePath ++ "-rnng")
-  rnngParseModel <- Torch.Train.loadParams rnngParseSpec (modelFilePath ++ "-rnng-parse")
 
   -- let RNNGSentence (s, actions) = head evaluationData
   -- print wordEmbDim
@@ -354,7 +358,7 @@ main = do
   -- print $ fmap (embedding' (toDependent (wordEmbedding rnngModel)) . asTensor . wordIndexFor) s
 
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
-      (acc, loss, predicted) = evaluate (rnngModel, rnngParseModel) indexData evaluationData answers
+      (acc, loss, predicted) = evaluate rnngModel indexData evaluationData answers
   
   print $ "acc: " ++ show (sum acc / (fromIntegral (length acc)::Float))
   print $ "loss: " ++ show loss
