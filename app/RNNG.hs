@@ -151,7 +151,7 @@ predictNextAction ::
   Tensor
 predictNextAction (RNNG PredictActionRNNG {..} _ _) RNNGState {..} = 
   let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent $ h0) buffer
-      stackEmbedding = snd $ last hiddenStack
+      stackEmbedding = snd $ head hiddenStack
       (_, actionEmbedding) = rnnLayer actionRNN (toDependent $ h0) actionHistory
       ut = Torch.tanh $ ((cat (Dim 0) [stackEmbedding, bufferEmbedding, actionEmbedding]) `matmul` (toDependent w) + (toDependent c))
   in logSoftmax (Dim 0) $ linearLayer linearParams ut
