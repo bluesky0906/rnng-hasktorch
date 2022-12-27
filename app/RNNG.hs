@@ -216,7 +216,7 @@ parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE
       (subTree, newStack) = splitAt (idx + 1) stack
       (_, newHiddenStack) = splitAt (idx + 1) hiddenStack
       -- composeする
-      composedSubTree = fst $ last $ biLstmLayers compLSTM (toDependent $ compc0, toDependent $ comph0) (reverse subTree)
+      composedSubTree = snd $ last $ biLstmLayers compLSTM (toDependent $ compc0, toDependent $ comph0) (reverse subTree)
   in RNNGState {
       stack = composedSubTree:newStack,
       textStack = (T.intercalate (T.pack " ") (reverse $ (T.pack ")"):textSubTree)):newTextStack,
@@ -244,7 +244,7 @@ predict Train _ _ [] results rnngState = (reverse results, rnngState)
 predict Train rnng indexData (action:rest) predictedHitory rnngState =
   let predicted = predictNextAction rnng rnngState
       newRNNGState = parse rnng indexData rnngState action
-  in predict Train rnng indexData rest (predicted:predictedHitory) (Debug.Trace.traceShow newRNNGState newRNNGState)
+  in predict Train rnng indexData rest (predicted:predictedHitory) newRNNGState
 
 predict Eval rnng IndexData {..} _ predictedHitory RNNGState {..} =
   if ((length textStack) == 1) && ((length textBuffer) == 0)
@@ -339,7 +339,7 @@ main = do
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 1 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
 
-  let batches = Data.List.take 1 dataForTraining
+  let batches = Data.List.take 100 dataForTraining
       rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
   initRNNGModel <- sample $ rnngSpec
 
@@ -355,31 +355,30 @@ main = do
               RNNG actionPredictRNNG parseRNNG compRNNG = rnng'
           (updatedActionPredictRNNG, opt1'') <- runStep actionPredictRNNG opt1' loss 1e-2
           (updatedParseRNNG, opt2'') <- runStep parseRNNG opt2' loss 1e-2
-          -- (updatedcompRNNG, opt3'') <- if length (filter (== REDUCE) actions) > 1
-          --                                then runStep compRNNG opt3' loss 1e-2
-          --                              else return (compRNNG, opt3')
-          -- updatedParse <- runStep rnngParse opt' loss 1e-2
-          return ((RNNG updatedActionPredictRNNG updatedParseRNNG compRNNG, (opt1'', opt2'', opt3')), (asValue loss::Float))
+          (updatedCompRNNG, opt3'') <- if length (filter (== REDUCE) actions) > 1
+                                         then runStep compRNNG opt3' loss 1e-2
+                                       else return (compRNNG, opt3')
+          return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (opt1'', opt2'', opt3'')), (asValue loss::Float))
 
       let loss = sum batchLosses / (fromIntegral (length batches)::Float)
       return (updated, loss)
 
   -- | model保存
-  -- Torch.Train.saveParams trained (modelFilePath ++ "-rnng")
-  -- drawLearningCurve graphFilePath "Learning Curve" [("", reverse losses)]
-  -- print losses
+  Torch.Train.saveParams trained (modelFilePath ++ "-rnng")
+  drawLearningCurve graphFilePath "Learning Curve" [("", reverse losses)]
+  print losses
   
-  -- -- | model読み込み
-  -- rnngModel <- Torch.Train.loadParams rnngSpec (modelFilePath ++ "-rnng")
+  -- | model読み込み
+  rnngModel <- Torch.Train.loadParams rnngSpec (modelFilePath ++ "-rnng")
 
-  -- -- let RNNGSentence (s, actions) = head evaluationData
-  -- -- print wordEmbDim
-  -- -- print $ shape $ toDependent $ wordEmbedding rnngModel
-  -- -- print $ fmap (embedding' (toDependent (wordEmbedding rnngModel)) . asTensor . wordIndexFor) s
+  -- let RNNGSentence (s, actions) = head evaluationData
+  -- print wordEmbDim
+  -- print $ shape $ toDependent $ wordEmbedding rnngModel
+  -- print $ fmap (embedding' (toDependent (wordEmbedding rnngModel)) . asTensor . wordIndexFor) s
 
-  -- let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
-  --     (acc, loss, predicted) = evaluate rnngModel indexData evaluationData answers
+  let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
+      (acc, loss, predicted) = evaluate rnngModel indexData evaluationData answers
   
-  -- print $ "acc: " ++ show (sum acc / (fromIntegral (length acc)::Float))
-  -- print $ "loss: " ++ show loss
+  print $ "acc: " ++ show (sum acc / (fromIntegral (length acc)::Float))
+  print $ "loss: " ++ show loss
   return ()
