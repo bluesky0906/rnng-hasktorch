@@ -40,23 +40,12 @@ data RNNGSpec = RNNGSpec {
 data PredictActionRNNG where
   PredictActionRNNG :: {
     bufferRNN :: RNNParams,
-    actionRNN :: RNNParams,
-    h0 :: Parameter,
+    bufferh0 :: Parameter,
     w :: Parameter,
     c :: Parameter,
     linearParams :: LinearParams
     } ->
     PredictActionRNNG
-  deriving (Show, Generic, Parameterized)
-
-data RNNG where
-  RNNG ::
-    {
-      predictActionRNNG :: PredictActionRNNG,
-      parseRNNG :: ParseRNNG,
-      compRNNG :: CompRNNG
-    } ->
-    RNNG
   deriving (Show, Generic, Parameterized)
 
 data ParseRNNG where
@@ -68,6 +57,8 @@ data ParseRNNG where
       stackLSTM :: LstmParams,
       stackh0 :: Parameter,
       stackc0 :: Parameter,
+      actionRNN :: RNNParams,
+      actionh0 :: Parameter,
       actionStart :: Parameter, -- dummy for empty action history
       bufferGuard :: Parameter, -- dummy for empty buffer
       stackGuard :: Parameter  -- dummy for empty stack
@@ -85,6 +76,17 @@ data CompRNNG where
     CompRNNG
   deriving (Show, Generic, Parameterized)
 
+
+data RNNG where
+  RNNG ::
+    {
+      predictActionRNNG :: PredictActionRNNG,
+      parseRNNG :: ParseRNNG,
+      compRNNG :: CompRNNG
+    } ->
+    RNNG
+  deriving (Show, Generic, Parameterized)
+
 instance
   Randomizable
     RNNGSpec
@@ -93,7 +95,6 @@ instance
     sample RNNGSpec {..} = do
       predictActionRNNG <- PredictActionRNNG
         <$> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
-        <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
         <*> (makeIndependent =<< randnIO' [hiddenSize])
         <*> (makeIndependent =<< randnIO' [hiddenSize * 3, hiddenSize])
         <*> (makeIndependent =<< randnIO' [hiddenSize])
@@ -104,6 +105,8 @@ instance
         <*> (makeIndependent =<< randnIO' [actionNumEmbed, wordEmbedSize])
         <*> sample (LstmHypParams modelDevice hiddenSize)
         <*> (makeIndependent =<< randnIO' [hiddenSize])
+        <*> (makeIndependent =<< randnIO' [hiddenSize])
+        <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
         <*> (makeIndependent =<< randnIO' [hiddenSize])
         <*> (makeIndependent =<< randnIO' [actionEmbedSize])
         <*> (makeIndependent =<< randnIO' [wordEmbedSize])
@@ -130,15 +133,23 @@ data RNNGState where
     {
       -- | stackをTensorで保存. 逆順で積まれる
       stack :: [Tensor],
-      -- | stackの状態を文字列で保存. 逆順で積まれる
+      -- | stackを文字列で保存. 逆順で積まれる
       textStack :: [T.Text],
+
       -- | TODO: (h, c)の順にする（hasktorch-toolsに追従）
       -- | stack lstmの隠れ状態の記録　(c, h)
       hiddenStack :: [(Tensor, Tensor)],
+      -- | bufferをTensorで保存. 正順で積まれる
       buffer :: [Tensor],
+      -- | bufferを文字列で保存. 正順で積まれる
       textBuffer :: [T.Text],
+
+      -- | action historyをTensorで保存. 逆順で積まれる
       actionHistory :: [Tensor],
-      textActionHistory :: [Action]
+      -- | action historyを文字列で保存. 逆順で積まれる
+      textActionHistory :: [Action],
+      -- | 現在のaction historyの隠れ層. push飲み行われるので最終層だけ常に保存.
+      hiddenActionHistory :: Tensor
     } ->
     RNNGState 
   deriving (Show)
@@ -150,17 +161,12 @@ predictNextAction ::
   -- | possibility of actions
   Tensor
 predictNextAction (RNNG PredictActionRNNG {..} _ _) RNNGState {..} = 
-  let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent $ h0) buffer
+  let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent $ bufferh0) buffer
       stackEmbedding = snd $ head hiddenStack
-      (_, actionEmbedding) = rnnLayer actionRNN (toDependent $ h0) actionHistory
+      actionEmbedding = hiddenActionHistory
       ut = Torch.tanh $ ((cat (Dim 0) [stackEmbedding, bufferEmbedding, actionEmbedding]) `matmul` (toDependent w) + (toDependent c))
   in logSoftmax (Dim 0) $ linearLayer linearParams ut
 
-push ::
-  [a] ->
-  a ->
-  [a]
-push list d = list ++ [d]
 
 stackLSTMForward :: 
   LstmParams ->
@@ -172,6 +178,15 @@ stackLSTMForward ::
   (Tensor, Tensor)
 stackLSTMForward stackLSTM stack newElem = last $ lstmLayer stackLSTM (head stack) [newElem]
 
+actionRNNForward ::
+  RNNParams ->
+  -- | h_n
+  Tensor ->
+  -- | new Element
+  Tensor ->
+  -- | h_n+1
+  Tensor
+actionRNNForward actionRNN hn newElem = snd $ rnnLayer actionRNN hn [newElem]
 
 parse ::
   -- | model
@@ -191,8 +206,9 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
       hiddenStack = (stackLSTMForward stackLSTM hiddenStack nt_embedding):hiddenStack,
       buffer = buffer,
       textBuffer = textBuffer,
-      actionHistory = push actionHistory action_embedding,
-      textActionHistory = push textActionHistory  textAction
+      actionHistory = action_embedding:actionHistory,
+      textActionHistory = textAction:textActionHistory,
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding
     }
 parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
   let textAction = SHIFT
@@ -203,8 +219,9 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
       hiddenStack = (stackLSTMForward stackLSTM hiddenStack (head buffer)):hiddenStack,
       buffer = tail buffer,
       textBuffer = tail textBuffer,
-      actionHistory = push actionHistory action_embedding,
-      textActionHistory = push textActionHistory textAction
+      actionHistory = action_embedding:actionHistory,
+      textActionHistory = textAction:textActionHistory,
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding
     }
 parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
   let textAction = REDUCE
@@ -223,8 +240,9 @@ parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE
       hiddenStack = (stackLSTMForward stackLSTM newHiddenStack composedSubTree):newHiddenStack,
       buffer = buffer,
       textBuffer = textBuffer,
-      actionHistory = push actionHistory action_embedding,
-      textActionHistory = push textActionHistory textAction
+      actionHistory = action_embedding:actionHistory,
+      textActionHistory = textAction:textActionHistory,
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding
     }
 
 
@@ -244,7 +262,7 @@ predict Train _ _ [] results rnngState = (reverse results, rnngState)
 predict Train rnng indexData (action:rest) predictedHitory rnngState =
   let predicted = predictNextAction rnng rnngState
       newRNNGState = parse rnng indexData rnngState action
-  in predict Train rnng indexData rest (predicted:predictedHitory) newRNNGState
+  in predict Train rnng indexData rest (predicted:predictedHitory) (Debug.Trace.traceShow newRNNGState newRNNGState)
 
 predict Eval rnng IndexData {..} _ predictedHitory RNNGState {..} =
   if ((length textStack) == 1) && ((length textBuffer) == 0)
@@ -276,7 +294,8 @@ rnngForward runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexDa
         buffer = sentsTensor ++ [toDependent bufferGuard],
         textBuffer = sents,
         actionHistory = [toDependent actionStart],
-        textActionHistory = []
+        textActionHistory = [],
+        hiddenActionHistory = actionRNNForward actionRNN (toDependent $ actionh0) (toDependent actionStart)
       }
   in fst $ predict runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
 
@@ -353,6 +372,8 @@ main = do
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
               loss = nllLoss' answer (Torch.stack (Dim 0) output)
               RNNG actionPredictRNNG parseRNNG compRNNG = rnng'
+          print sents
+          print actions
           (updatedActionPredictRNNG, opt1'') <- runStep actionPredictRNNG opt1' loss 1e-2
           (updatedParseRNNG, opt2'') <- runStep parseRNNG opt2' loss 1e-2
           (updatedCompRNNG, opt3'') <- if length (filter (== REDUCE) actions) > 1
