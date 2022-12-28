@@ -23,6 +23,7 @@ import GHC.Generics
 import qualified Data.Text as T 
 import Data.List
 import Debug.Trace
+import System.Random
 
 
 
@@ -332,6 +333,17 @@ evaluate rnng IndexData {..} batches answers =
       size = fromIntegral (length batches)::Float
   in (acc, loss/size, ans)
 
+sampleRandomData ::
+  -- | データ
+  [RNNGSentence] ->
+  -- | 取り出したいデータ数
+  Int ->
+  -- | サンプル結果
+  IO [RNNGSentence]
+sampleRandomData xs size = do
+  gen <- newStdGen
+  let randomIdxes = Data.List.take size $ nub $ randomRs (0, (length xs) - 1) gen
+  return $ map (xs !!) randomIdxes
 
 main :: IO()
 main = do
@@ -345,7 +357,7 @@ main = do
       actionEmbedSize = fromIntegral (getActionEmbedSize config)::Int
       hiddenSize = fromIntegral (getHiddenSize config)::Int
       numLayer = fromIntegral (getNumLayer config)::Int
-      learningRate = fromIntegral (getLearningRate config)::Double
+      learningRate = asTensor (getLearningRate config)
       modelFilePath = getModelFilePath config
       graphFilePath = getGraphFilePath config
       device = Device CPU 0
@@ -355,29 +367,35 @@ main = do
   validationData <- loadActionsFromBinary $ getValidationDataPath config
   evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
   let dataForTraining = trainingData
+  print $ "Training Data Size: " ++ show (length trainingData)
+  print $ "Validation Data Size: " ++ show (length validationData)
+  print $ "Evaluation Data Size: " ++ show (length evaluationData)
 
   -- create index data
   let (wordIndexFor, indexWordFor, wordEmbDim) = indexFactory (buildVocab dataForTraining 3 toWordList) (T.pack "unk") Nothing
       (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 1 toActionList) ERROR Nothing
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 1 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
+  print $ "WordEmbDim: " ++ show wordEmbDim
+  print $ "ActionEmbDim: " ++ show actionEmbDim
+  print $ "NTEmbDim: " ++ show ntEmbDim
 
-  let batches = Data.List.take 100 dataForTraining
-      rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
+  let rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
   initRNNGModel <- sample $ rnngSpec
 
   -- | training
   ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
     \epoc (rnng, (opt1, opt2, opt3)) -> do
-      (updated, batchLosses) <- mapAccumM batches (rnng, (opt1, opt2, opt3)) $ 
+      -- |　毎epochごとに100ずつサンプリング
+      batches <- sampleRandomData dataForTraining 100 
+
+      ((updated, opts), batchLosses) <- mapAccumM batches (rnng, (opt1, opt2, opt3)) $ 
         \batch (rnng', (opt1', opt2', opt3')) -> do
           let RNNGSentence (sents, actions) = batch
               answer = asTensor $ fmap actionIndexFor actions
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
               loss = nllLoss' answer (Torch.stack (Dim 0) output)
               RNNG actionPredictRNNG parseRNNG compRNNG = rnng'
-          print sents
-          print actions
           -- | パラメータ更新
           (updatedActionPredictRNNG, opt1'') <- runStep actionPredictRNNG opt1' loss learningRate
           (updatedParseRNNG, opt2'') <- runStep parseRNNG opt2' loss learningRate
@@ -386,8 +404,16 @@ main = do
                                        else return (compRNNG, opt3')
           return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (opt1'', opt2'', opt3'')), (asValue loss::Float))
 
-      let loss = sum batchLosses / (fromIntegral (length batches)::Float)
-      return (updated, loss)
+      let trainingLoss = sum batchLosses / (fromIntegral (length batches)::Float)
+      print $ "Epoch #" ++ show epoch 
+      print $ " Training Loss: " ++ show trainingLoss
+
+      -- | validation
+      let answers = fmap (\(RNNGSentence (_, actions)) -> actions) validationData
+          (validationAcc, validationLoss, _) = evaluate updated indexData validationData answers
+      print $ " Validation Loss: " ++ show validationLoss
+      print $ " Validation Accuracy: " ++ show validationAcc
+      return ((updated, opts), validationLoss)
 
   -- | model保存
   Torch.Train.saveParams trained (modelFilePath ++ "-rnng")
