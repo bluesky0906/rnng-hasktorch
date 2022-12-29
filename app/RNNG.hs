@@ -3,12 +3,13 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE BlockArguments #-}
 
 
 module RNNG where
 import PTB
 import Util
-import Torch hiding (foldLoop)
+import Torch hiding (foldLoop, take)
 -- | hasktorch-tools
 import Torch.Layer.RNN (RNNHypParams(..), RNNParams, rnnLayer)
 import Torch.Layer.BiLSTM (BiLstmHypParams(..), BiLstmParams, biLstmLayers)
@@ -22,6 +23,7 @@ import ML.Exp.Chart (drawLearningCurve)
 import GHC.Generics
 import qualified Data.Text as T 
 import Data.List
+import Data.Functor
 import Debug.Trace
 import System.Random
 import Control.Monad
@@ -367,16 +369,20 @@ evaluate ::
   -- | action answers
   [[Action]] ->
   -- | (accuracy, loss, predicted action sequence)
-  (Float, [[Action]])
+  (Float, Float, [[Action]])
 evaluate rnng IndexData {..} batches answers =
-  let (acc, predicted) = foldLoop (zip batches answers) (0, []::[[Action]]) $ 
-        \(batch, answerActions) (acc', predicted') ->
+  let (acc, losses, predictions) = foldLoop (zip batches answers) (0, 0::Float, []::[[Action]]) $ 
+        \(batch, answerActions) (acc', loss', predicted') ->
           let answer = toDevice myDevice $ asTensor $ fmap actionIndexFor answerActions
-              output = rnngForward Eval rnng IndexData {..} batch
+              output = rnngForward Train rnng IndexData {..} batch
               predicted = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
-              -- | 推論したactionのサイズと異なる場合、-1で埋めて調整する
               predictedSize = shape predicted !! 0
               answerSize = shape answer !! 0
+              -- | lossの計算は答えと推論結果の系列長が同じ時だけ
+              loss = if predictedSize == answerSize
+                      then nllLoss' answer (Torch.stack (Dim 0) output)
+                      else asTensor (0::Float)
+              -- | 推論したactionのサイズと異なる場合、-1で埋めて調整する
               alignedPredicted = if predictedSize < answerSize
                                   then cat (Dim 0) [predicted, toDevice myDevice $ asTensor ((replicate (answerSize - predictedSize) (-1))::[Int])]
                                   else predicted
@@ -386,20 +392,32 @@ evaluate rnng IndexData {..} batches answers =
               numCorrect = asValue (sumAll $ eq alignedAnswer alignedPredicted)::Int
               accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictedSize)::Float
               predictedActions = fmap indexActionFor (asValue predicted::[Int])
-          in (accuracy + acc', predictedActions:predicted')
-  in (acc / fromIntegral (length answers)::Float, predicted)
+          in (acc' + accuracy, loss' + (asValue loss::Float), predictedActions:predicted')
+      size = fromIntegral (length answers)::Float
+  in (acc / size, losses / size, reverse predictions)
 
 sampleRandomData ::
-  -- | データ
-  [RNNGSentence] ->
   -- | 取り出したいデータ数
   Int ->
+  -- | データ
+  [a] ->
   -- | サンプル結果
-  IO [RNNGSentence]
-sampleRandomData xs size = do
+  IO [a]
+sampleRandomData size xs = do
   gen <- newStdGen
   let randomIdxes = Data.List.take size $ nub $ randomRs (0, (length xs) - 1) gen
   return $ map (xs !!) randomIdxes
+
+printResult ::
+  [(RNNGSentence, [Action])] ->
+  IO ()
+printResult result = forM_ result \(RNNGSentence (words, actions), predition) -> do
+  putStrLn "----------------------------------"
+  putStrLn $ "Sentence: " ++ show words
+  putStrLn $ "Actions:    " ++ show actions
+  putStrLn $ "Prediction: " ++ show predition
+  putStrLn "----------------------------------"
+  return ()
 
 main :: IO()
 main = do
@@ -407,6 +425,7 @@ main = do
   config <- configLoad
   putStrLn "Experiment Setting: "
   print config
+  putStrLn "======================================"
 
   let iter = fromIntegral (getEpoch config)::Int
       wordEmbedSize = fromIntegral (getWordEmbedSize config)::Int
@@ -422,18 +441,20 @@ main = do
   validationData <- loadActionsFromBinary $ getValidationDataPath config
   evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
   let dataForTraining = trainingData
-  print $ "Training Data Size: " ++ show (length trainingData)
-  print $ "Validation Data Size: " ++ show (length validationData)
-  print $ "Evaluation Data Size: " ++ show (length evaluationData)
+  putStrLn $ "Training Data Size: " ++ show (length trainingData)
+  putStrLn $ "Validation Data Size: " ++ show (length validationData)
+  putStrLn $ "Evaluation Data Size: " ++ show (length evaluationData)
+  putStrLn "======================================"
 
   -- create index data
   let (wordIndexFor, indexWordFor, wordEmbDim) = indexFactory (buildVocab dataForTraining 0 toWordList) (T.pack "unk") Nothing
       (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 0 toActionList) ERROR Nothing
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 0 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
-  print $ "WordEmbDim: " ++ show wordEmbDim
-  print $ "ActionEmbDim: " ++ show actionEmbDim
-  print $ "NTEmbDim: " ++ show ntEmbDim
+  putStrLn $ "WordEmbDim: " ++ show wordEmbDim
+  putStrLn $ "ActionEmbDim: " ++ show actionEmbDim
+  putStrLn $ "NTEmbDim: " ++ show ntEmbDim
+  putStrLn "======================================"
 
   let rnngSpec = RNNGSpec myDevice wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
   initRNNGModel <- toDevice myDevice <$> sample rnngSpec
@@ -442,7 +463,7 @@ main = do
   ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
     \epoch (rnng, (opt1, opt2, opt3)) -> do
       -- |　毎epochごとに100ずつサンプリング
-      batches <- sampleRandomData dataForTraining 100
+      batches <- sampleRandomData 100 dataForTraining 
 
       ((updated, opts), batchLosses) <- mapAccumM batches (rnng, (opt1, opt2, opt3)) $ 
         \batch (rnng', (opt1', opt2', opt3')) -> do
@@ -461,25 +482,28 @@ main = do
           return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (opt1'', opt2'', opt3'')), (asValue loss::Float))
 
       let trainingLoss = sum batchLosses / (fromIntegral (length batches)::Float)
-      print $ "Epoch #" ++ show epoch 
-      print $ "Training Loss: " ++ show trainingLoss
+      putStrLn $ "Epoch #" ++ show epoch 
+      putStrLn $ "Training Loss: " ++ show trainingLoss
 
       when (epoch `mod` 5 == 0) $ do
         let answers = fmap (\(RNNGSentence (_, actions)) -> actions) validationData
-            (validationAcc, _) = evaluate updated indexData validationData answers
-        print $ "Validation Accuracy: " ++ show validationAcc
+            (validationAcc, validationLoss, validationPrediction) = evaluate updated indexData validationData answers
+        putStrLn $ "Validation Accuracy: " ++ show validationAcc
+        putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
+        sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
+        putStrLn "======================================"
       return ((updated, opts), trainingLoss)
 
   -- | model保存
-  Torch.Train.saveParams trained (modelFilePath ++ "-rnng")
+  Torch.Train.saveParams trained modelFilePath
   drawLearningCurve graphFilePath "Learning Curve" [("", reverse losses)]
   print losses
   
   -- | model読み込み
-  rnngModel <- Torch.Train.loadParams rnngSpec (modelFilePath ++ "-rnng")
+  rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
 
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
-      (acc, predicted) = evaluate rnngModel indexData evaluationData answers
-  -- print $ zip answers predicted
+      (acc, _, evaluationPrediction) = evaluate rnngModel indexData evaluationData answers
+  sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= printResult  
   print $ "acc: " ++ show acc
   return ()
