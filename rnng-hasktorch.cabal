@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 98737263177cb2daf00ffca98c1d7cc082098c9917b4492b57190eece9bc1b47
+-- hash: e2d9da0bff81dd34f094f13aece60d0c6df98fa801977d18cca967579ce2627a
 
 name:           rnng-hasktorch
 version:        0.1.0.0
@@ -51,6 +51,7 @@ library
     , parsec
     , process
     , projectroot
+    , random
     , split
     , store
     , text
@@ -79,6 +80,7 @@ executable Preprocessing
     , parsec
     , process
     , projectroot
+    , random
     , rnng-hasktorch
     , split
     , store
@@ -108,6 +110,7 @@ executable RNNG
     , parsec
     , process
     , projectroot
+    , random
     , rnng-hasktorch
     , split
     , store
@@ -140,6 +143,7 @@ test-suite rnng-hasktorch-test
     , parsec
     , process
     , projectroot
+    , random
     , rnng-hasktorch
     , split
     , store

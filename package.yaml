@@ -40,6 +40,7 @@ dependencies:
 - constraints
 - gnuplot
 - process
+- random
 
 library:
   source-dirs: src
