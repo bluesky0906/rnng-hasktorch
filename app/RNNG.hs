@@ -24,6 +24,7 @@ import qualified Data.Text as T
 import Data.List
 import Debug.Trace
 import System.Random
+import Control.Monad
 
 
 
@@ -150,23 +151,82 @@ data RNNGState where
       -- | action historyを文字列で保存. 逆順で積まれる
       textActionHistory :: [Action],
       -- | 現在のaction historyの隠れ層. push飲み行われるので最終層だけ常に保存.
-      hiddenActionHistory :: Tensor
+      hiddenActionHistory :: Tensor,
+
+      -- | 開いているNTの数
+      numOpenParen :: Int
     } ->
     RNNGState 
   deriving (Show)
+
+
+checkNTForbidden ::
+  RNNGState ->
+  Bool
+checkNTForbidden RNNGState {..} =
+  numOpenParen > 100 -- 開いているNTが多すぎる時
+  || length textBuffer == 0 -- 単語が残っていない時
+  
+checkREDUCEForbidden ::
+  RNNGState ->
+  Bool
+checkREDUCEForbidden RNNGState {..} =
+  length textStack < 2  -- first action must be NT
+  || (numOpenParen == 1 && length textBuffer > 0) -- bufferに単語が残ってるのに木を一つにまとめることはできない
+  || ((previousAction /= SHIFT) && (previousAction /= REDUCE)) -- can't REDUCE after NT
+  where 
+    previousAction = if length textActionHistory > 0
+                      then head textActionHistory
+                      else ERROR
+
+checkSHIFTForbidden ::
+  RNNGState ->
+  Bool
+checkSHIFTForbidden RNNGState{..} =
+  length textStack == 0 -- first action must be NT
+  || length textBuffer == 0 -- Buffer isn't empty
+
+maskTensor :: 
+  RNNGState ->
+  [Action] ->
+  Tensor
+maskTensor rnngState actions = asTensor $ map mask actions
+  where 
+    ntForbidden = checkNTForbidden rnngState
+    reduceForbidden = checkREDUCEForbidden rnngState
+    shiftForbidden = checkSHIFTForbidden rnngState
+    mask :: Action -> Bool
+    mask ERROR = False
+    mask (NT _) = ntForbidden
+    mask REDUCE = reduceForbidden
+    mask SHIFT = shiftForbidden
+
+maskImpossibleAction ::
+  Tensor ->
+  RNNGState ->
+  IndexData ->
+  Tensor
+maskImpossibleAction predicted rnngState IndexData {..}  =
+  let actions = map indexActionFor [0..((shape predicted !! 0) - 1)]
+      boolTensor = maskTensor rnngState actions
+  in maskedFill predicted boolTensor (1e-38::Float)
+
 
 predictNextAction ::
   RNNG ->
   -- | data
   RNNGState ->
+  IndexData ->
   -- | possibility of actions
   Tensor
-predictNextAction (RNNG PredictActionRNNG {..} _ _) RNNGState {..} = 
+predictNextAction (RNNG PredictActionRNNG {..} _ _) RNNGState {..} indexData = 
   let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent $ bufferh0) buffer
       stackEmbedding = snd $ head hiddenStack
       actionEmbedding = hiddenActionHistory
       ut = Torch.tanh $ ((cat (Dim 0) [stackEmbedding, bufferEmbedding, actionEmbedding]) `matmul` (toDependent w) + (toDependent c))
-  in logSoftmax (Dim 0) $ linearLayer linearParams ut
+      actionLogit = linearLayer linearParams ut
+      maskedAction = maskImpossibleAction actionLogit RNNGState {..} indexData
+  in logSoftmax (Dim 0) $ maskedAction
 
 
 stackLSTMForward :: 
@@ -209,7 +269,8 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
       textBuffer = textBuffer,
       actionHistory = action_embedding:actionHistory,
       textActionHistory = textAction:textActionHistory,
-      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
+      numOpenParen = numOpenParen + 1
     }
 parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
   let textAction = SHIFT
@@ -222,7 +283,8 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
       textBuffer = tail textBuffer,
       actionHistory = action_embedding:actionHistory,
       textActionHistory = textAction:textActionHistory,
-      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
+      numOpenParen = numOpenParen
     }
 parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
   let textAction = REDUCE
@@ -243,7 +305,8 @@ parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE
       textBuffer = textBuffer,
       actionHistory = action_embedding:actionHistory,
       textActionHistory = textAction:textActionHistory,
-      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
+      numOpenParen = numOpenParen - 1
     }
 
 
@@ -261,7 +324,7 @@ predict ::
   ([Tensor], RNNGState)
 predict Train _ _ [] results rnngState = (reverse results, rnngState)
 predict Train rnng indexData (action:rest) predictedHitory rnngState =
-  let predicted = predictNextAction rnng rnngState
+  let predicted = predictNextAction rnng rnngState indexData
       newRNNGState = parse rnng indexData rnngState action
   in predict Train rnng indexData rest (predicted:predictedHitory) newRNNGState
 
@@ -269,15 +332,10 @@ predict Eval rnng IndexData {..} _ predictedHitory RNNGState {..} =
   if ((length textStack) == 1) && ((length textBuffer) == 0)
     then (reverse predictedHitory, RNNGState {..} )
   else
-    let predicted = predictNextAction rnng RNNGState {..}
+    let predicted = predictNextAction rnng RNNGState {..} IndexData {..}
         action = indexActionFor (asValue (argmax (Dim 0) RemoveDim predicted)::Int)
-    -- 不正なactionを予測した場合
-    -- TODO: valid　actionのみに絞る
-    in if (action == REDUCE && (length textStack == 1)) || (action == SHIFT && (length textBuffer) == 0)
-         then (reverse predictedHitory, RNNGState {..} )
-       else
-         let newRNNGState = parse rnng IndexData {..} RNNGState {..} action
-         in predict Eval rnng IndexData {..}  [] (predicted:predictedHitory) newRNNGState
+        newRNNGState = parse rnng IndexData {..} RNNGState {..} action
+    in predict Eval rnng IndexData {..}  [] (predicted:predictedHitory) newRNNGState
 
 rnngForward ::
   RuntimeMode ->
@@ -296,7 +354,8 @@ rnngForward runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexDa
         textBuffer = sents,
         actionHistory = [toDependent actionStart],
         textActionHistory = [],
-        hiddenActionHistory = actionRNNForward actionRNN (toDependent $ actionh0) (toDependent actionStart)
+        hiddenActionHistory = actionRNNForward actionRNN (toDependent $ actionh0) (toDependent actionStart),
+        numOpenParen = 0
       }
   in fst $ predict runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
 
@@ -307,18 +366,16 @@ evaluate ::
   -- | action answers
   [[Action]] ->
   -- | (accuracy, loss, predicted action sequence)
-  ([Float], Float, [[Action]])
+  (Float, [[Action]])
 evaluate rnng IndexData {..} batches answers =
-  let (acc, loss, ans) = foldLoop (zip batches answers) ([], 0, []::[[Action]]) $ 
-        \(batch, answerActions) (acc', loss', ans') ->
+  let (acc, predicted) = foldLoop (zip batches answers) (0, []::[[Action]]) $ 
+        \(batch, answerActions) (acc', predicted') ->
           let answer = asTensor $ fmap actionIndexFor answerActions
               output = rnngForward Eval rnng IndexData {..} batch
-              predicted = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output 
+              predicted = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
+              -- | 推論したactionのサイズと異なる場合、-1で埋めて調整する
               predictedSize = shape predicted !! 0
               answerSize = shape answer !! 0
-              alignedOutput = if predictedSize < answerSize
-                                  then output ++ replicate (answerSize - predictedSize) (zeros' [shape (head output) !! 0])
-                                  else output 
               alignedPredicted = if predictedSize < answerSize
                                   then cat (Dim 0) [predicted, asTensor ((replicate (answerSize - predictedSize) (-1))::[Int])]
                                   else predicted
@@ -327,11 +384,9 @@ evaluate rnng IndexData {..} batches answers =
                                 else answer
               numCorrect = asValue (sumAll $ eq alignedAnswer alignedPredicted)::Int
               accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictedSize)::Float
-              batchLoss = asValue (nllLoss' alignedAnswer (Torch.stack (Dim 0) alignedOutput))::Float
               predictedActions = fmap indexActionFor (asValue predicted::[Int])
-          in (accuracy:acc', loss' + batchLoss, predictedActions:ans')
-      size = fromIntegral (length batches)::Float
-  in (acc, loss/size, ans)
+          in (accuracy + acc', predictedActions:predicted')
+  in (acc / fromIntegral (length answers)::Float, predicted)
 
 sampleRandomData ::
   -- | データ
@@ -387,7 +442,7 @@ main = do
   ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
     \epoch (rnng, (opt1, opt2, opt3)) -> do
       -- |　毎epochごとに100ずつサンプリング
-      batches <- sampleRandomData dataForTraining 100 
+      batches <- sampleRandomData dataForTraining 100
 
       ((updated, opts), batchLosses) <- mapAccumM batches (rnng, (opt1, opt2, opt3)) $ 
         \batch (rnng', (opt1', opt2', opt3')) -> do
@@ -406,13 +461,12 @@ main = do
 
       let trainingLoss = sum batchLosses / (fromIntegral (length batches)::Float)
       print $ "Epoch #" ++ show epoch 
-      print $ " Training Loss: " ++ show trainingLoss
+      print $ "Training Loss: " ++ show trainingLoss
 
-      -- | validation
-      let answers = fmap (\(RNNGSentence (_, actions)) -> actions) validationData
-          (validationAcc, validationLoss, _) = evaluate updated indexData validationData answers
-      print $ " Validation Loss: " ++ show validationLoss
-      print $ " Validation Accuracy: " ++ show validationAcc
+      when (iter `mod` 5 == 0) $ do
+        let answers = fmap (\(RNNGSentence (_, actions)) -> actions) validationData
+            (validationAcc, _) = evaluate updated indexData validationData answers
+        print $ "Validation Accuracy: " ++ show validationAcc
       return ((updated, opts), trainingLoss)
 
   -- | model保存
@@ -424,8 +478,7 @@ main = do
   rnngModel <- Torch.Train.loadParams rnngSpec (modelFilePath ++ "-rnng")
 
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
-      (acc, loss, predicted) = evaluate rnngModel indexData evaluationData answers
-  
-  print $ "acc: " ++ show (sum acc / (fromIntegral (length acc)::Float))
-  print $ "loss: " ++ show loss
+      (acc, predicted) = evaluate rnngModel indexData evaluationData answers
+  -- print $ zip answers predicted
+  print $ "acc: " ++ show acc
   return ()
