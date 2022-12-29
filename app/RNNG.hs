@@ -427,7 +427,7 @@ main = do
   print $ "Evaluation Data Size: " ++ show (length evaluationData)
 
   -- create index data
-  let (wordIndexFor, indexWordFor, wordEmbDim) = indexFactory (buildVocab dataForTraining 3 toWordList) (T.pack "unk") Nothing
+  let (wordIndexFor, indexWordFor, wordEmbDim) = indexFactory (buildVocab dataForTraining 1 toWordList) (T.pack "unk") Nothing
       (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 1 toActionList) ERROR Nothing
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 1 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
@@ -464,7 +464,7 @@ main = do
       print $ "Epoch #" ++ show epoch 
       print $ "Training Loss: " ++ show trainingLoss
 
-      when (iter `mod` 5 == 0) $ do
+      when (epoch `mod` 5 == 0) $ do
         let answers = fmap (\(RNNGSentence (_, actions)) -> actions) validationData
             (validationAcc, _) = evaluate updated indexData validationData answers
         print $ "Validation Accuracy: " ++ show validationAcc
