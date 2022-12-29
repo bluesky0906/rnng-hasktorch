@@ -449,7 +449,8 @@ main = do
           let RNNGSentence (sents, actions) = batch
               answer = asTensor $ fmap actionIndexFor actions
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
-              loss = nllLoss' answer (Torch.stack (Dim 0) output)
+          dropoutOutput <- forM output (dropout 0.2 True) 
+          let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
               RNNG actionPredictRNNG parseRNNG compRNNG = rnng'
           -- | パラメータ更新
           (updatedActionPredictRNNG, opt1'') <- runStep actionPredictRNNG opt1' loss learningRate
