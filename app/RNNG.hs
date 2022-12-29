@@ -26,7 +26,8 @@ import Debug.Trace
 import System.Random
 import Control.Monad
 
-
+myDevice :: Device
+myDevice = Device CUDA 0
 
 data RNNGSpec = RNNGSpec {
   modelDevice :: Device,
@@ -171,7 +172,7 @@ checkREDUCEForbidden ::
   RNNGState ->
   Bool
 checkREDUCEForbidden RNNGState {..} =
-  length textStack < 2  -- first action must be NT
+  length textStack < 2  -- first action must be NT and don't predict POS
   || (numOpenParen == 1 && length textBuffer > 0) -- bufferに単語が残ってるのに木を一つにまとめることはできない
   || ((previousAction /= SHIFT) && (previousAction /= REDUCE)) -- can't REDUCE after NT
   where 
@@ -190,7 +191,7 @@ maskTensor ::
   RNNGState ->
   [Action] ->
   Tensor
-maskTensor rnngState actions = asTensor $ map mask actions
+maskTensor rnngState actions = toDevice myDevice $ asTensor $ map mask actions
   where 
     ntForbidden = checkNTForbidden rnngState
     reduceForbidden = checkREDUCEForbidden rnngState
@@ -258,9 +259,9 @@ parse ::
   Action ->
   RNNGState
 parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
-  let nt_embedding = embedding' (toDependent ntEmbedding) ((asTensor . ntIndexFor) label)
+  let nt_embedding = embedding' (toDependent ntEmbedding) ((toDevice myDevice . asTensor . ntIndexFor) label)
       textAction = NT label
-      action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice myDevice . asTensor . actionIndexFor) textAction)
   in RNNGState {
       stack = nt_embedding:stack,
       textStack = ((T.pack "(") `T.append` label):textStack,
@@ -274,7 +275,7 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
     }
 parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
   let textAction = SHIFT
-      action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice myDevice . asTensor . actionIndexFor) textAction)
   in RNNGState {
       stack = (head buffer):stack,
       textStack = (head textBuffer):textStack,
@@ -288,7 +289,7 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
     }
 parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
   let textAction = REDUCE
-      action_embedding = embedding' (toDependent actionEmbedding) ((asTensor . actionIndexFor) textAction)
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice myDevice . asTensor . actionIndexFor) textAction)
       -- | 開いたlabelのidxを特定する
       (Just idx) = findIndex (\elem -> (T.isPrefixOf (T.pack "(") elem) && not (T.isSuffixOf (T.pack ")") elem)) textStack
       -- | popする
@@ -345,7 +346,7 @@ rnngForward ::
   RNNGSentence ->
   [Tensor]
 rnngForward runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
-  let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . asTensor . wordIndexFor) sents
+  let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . toDevice myDevice . asTensor . wordIndexFor) sents
       initRNNGState = RNNGState {
         stack = [toDependent stackGuard],
         textStack = [],
@@ -370,17 +371,17 @@ evaluate ::
 evaluate rnng IndexData {..} batches answers =
   let (acc, predicted) = foldLoop (zip batches answers) (0, []::[[Action]]) $ 
         \(batch, answerActions) (acc', predicted') ->
-          let answer = asTensor $ fmap actionIndexFor answerActions
+          let answer = toDevice myDevice $ asTensor $ fmap actionIndexFor answerActions
               output = rnngForward Eval rnng IndexData {..} batch
               predicted = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
               -- | 推論したactionのサイズと異なる場合、-1で埋めて調整する
               predictedSize = shape predicted !! 0
               answerSize = shape answer !! 0
               alignedPredicted = if predictedSize < answerSize
-                                  then cat (Dim 0) [predicted, asTensor ((replicate (answerSize - predictedSize) (-1))::[Int])]
+                                  then cat (Dim 0) [predicted, toDevice myDevice $ asTensor ((replicate (answerSize - predictedSize) (-1))::[Int])]
                                   else predicted
               alignedAnswer = if predictedSize > answerSize
-                                then cat (Dim 0) [answer, asTensor ((replicate (predictedSize - answerSize) (-1))::[Int])]
+                                then cat (Dim 0) [answer, toDevice myDevice $ asTensor ((replicate (predictedSize - answerSize) (-1))::[Int])]
                                 else answer
               numCorrect = asValue (sumAll $ eq alignedAnswer alignedPredicted)::Int
               accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictedSize)::Float
@@ -412,10 +413,9 @@ main = do
       actionEmbedSize = fromIntegral (getActionEmbedSize config)::Int
       hiddenSize = fromIntegral (getHiddenSize config)::Int
       numLayer = fromIntegral (getNumLayer config)::Int
-      learningRate = asTensor (getLearningRate config)
+      learningRate = toDevice myDevice $ asTensor (getLearningRate config)
       modelFilePath = getModelFilePath config
       graphFilePath = getGraphFilePath config
-      device = Device CPU 0
       optim = GD
   -- data
   trainingData <- loadActionsFromBinary $ getTrainingDataPath config
@@ -435,8 +435,8 @@ main = do
   print $ "ActionEmbDim: " ++ show actionEmbDim
   print $ "NTEmbDim: " ++ show ntEmbDim
 
-  let rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
-  initRNNGModel <- sample $ rnngSpec
+  let rnngSpec = RNNGSpec myDevice wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
+  initRNNGModel <- toDevice myDevice <$> sample rnngSpec
 
   -- | training
   ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
@@ -447,7 +447,7 @@ main = do
       ((updated, opts), batchLosses) <- mapAccumM batches (rnng, (opt1, opt2, opt3)) $ 
         \batch (rnng', (opt1', opt2', opt3')) -> do
           let RNNGSentence (sents, actions) = batch
-              answer = asTensor $ fmap actionIndexFor actions
+              answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
           dropoutOutput <- forM output (dropout 0.2 True) 
           let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
