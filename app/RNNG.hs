@@ -385,7 +385,7 @@ main = do
 
   -- | training
   ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
-    \epoc (rnng, (opt1, opt2, opt3)) -> do
+    \epoch (rnng, (opt1, opt2, opt3)) -> do
       -- |　毎epochごとに100ずつサンプリング
       batches <- sampleRandomData dataForTraining 100 
 
@@ -413,7 +413,7 @@ main = do
           (validationAcc, validationLoss, _) = evaluate updated indexData validationData answers
       print $ " Validation Loss: " ++ show validationLoss
       print $ " Validation Accuracy: " ++ show validationAcc
-      return ((updated, opts), validationLoss)
+      return ((updated, opts), trainingLoss)
 
   -- | model保存
   Torch.Train.saveParams trained (modelFilePath ++ "-rnng")
