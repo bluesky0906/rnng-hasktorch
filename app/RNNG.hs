@@ -1,26 +1,22 @@
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE BlockArguments #-}
 
 
 module RNNG where
+import Model.RNNG
 import PTB
 import Util
 import Torch hiding (foldLoop, take, repeat)
 -- | hasktorch-tools
-import Torch.Layer.RNN (RNNHypParams(..), RNNParams, rnnLayer)
-import Torch.Layer.BiLSTM (BiLstmHypParams(..), BiLstmParams, biLstmLayers)
-import Torch.Layer.LSTM (LstmHypParams(..), LstmParams, lstmLayer)
-import Torch.Layer.Linear
-import Torch.Control (mapAccumM, foldLoop, makeBatch)
+import Torch.Layer.RNN (RNNParams, rnnLayer)
+import Torch.Layer.BiLSTM (BiLstmParams, biLstmLayers)
+import Torch.Layer.LSTM (LstmParams, lstmLayer)
+import Torch.Layer.Linear (linearLayer)
+import Torch.Control (mapAccumM, makeBatch)
 import Torch.Train (update, saveParams, loadParams)
 -- | nlp-tools
 import ML.Exp.Chart (drawLearningCurve)
 
-import GHC.Generics
 import qualified Data.Text as T 
 import Data.List
 import Data.Functor
@@ -31,137 +27,10 @@ import Control.Monad
 myDevice :: Device
 myDevice = Device CUDA 0
 
-data RNNGSpec = RNNGSpec {
-  modelDevice :: Device,
-  wordEmbedSize :: Int,
-  actionEmbedSize :: Int,
-  wordNumEmbed :: Int,
-  actionNumEmbed :: Int,
-  ntNumEmbed :: Int,
-  hiddenSize :: Int
-} deriving (Show, Eq)
 
-
-data PredictActionRNNG where
-  PredictActionRNNG :: {
-    bufferRNN :: RNNParams,
-    bufferh0 :: Parameter,
-    w :: Parameter,
-    c :: Parameter,
-    linearParams :: LinearParams
-    } ->
-    PredictActionRNNG
-  deriving (Show, Generic, Parameterized)
-
-data ParseRNNG where
-  ParseRNNG ::
-    {
-      wordEmbedding :: Parameter,
-      ntEmbedding :: Parameter,
-      actionEmbedding :: Parameter,
-      stackLSTM :: LstmParams,
-      stackh0 :: Parameter,
-      stackc0 :: Parameter,
-      actionRNN :: RNNParams,
-      actionh0 :: Parameter,
-      actionStart :: Parameter, -- dummy for empty action history
-      bufferGuard :: Parameter, -- dummy for empty buffer
-      stackGuard :: Parameter  -- dummy for empty stack
-    } ->
-    ParseRNNG
-  deriving (Show, Generic, Parameterized)
-
-data CompRNNG where
-  CompRNNG ::
-    {
-      compLSTM :: BiLstmParams,
-      comph0 :: Parameter,
-      compc0 :: Parameter
-    } ->
-    CompRNNG
-  deriving (Show, Generic, Parameterized)
-
-
-data RNNG where
-  RNNG ::
-    {
-      predictActionRNNG :: PredictActionRNNG,
-      parseRNNG :: ParseRNNG,
-      compRNNG :: CompRNNG
-    } ->
-    RNNG
-  deriving (Show, Generic, Parameterized)
-
-instance
-  Randomizable
-    RNNGSpec
-    RNNG
-  where
-    sample RNNGSpec {..} = do
-      predictActionRNNG <- PredictActionRNNG
-        <$> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize * 3, hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> sample (LinearHypParams modelDevice hiddenSize actionNumEmbed)
-      parseRNNG <- ParseRNNG
-        <$> (makeIndependent =<< randnIO' [wordNumEmbed, wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [ntNumEmbed, wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [actionNumEmbed, wordEmbedSize])
-        <*> sample (LstmHypParams modelDevice hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [actionEmbedSize])
-        <*> (makeIndependent =<< randnIO' [wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [wordEmbedSize])
-      compRNNG <- CompRNNG
-        <$> sample (BiLstmHypParams modelDevice 1 hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-      return $ RNNG predictActionRNNG parseRNNG compRNNG
-
-
-
-data IndexData = IndexData {
-    wordIndexFor :: T.Text -> Int,
-    indexWordFor :: Int -> T.Text,
-    actionIndexFor :: Action -> Int,
-    indexActionFor :: Int -> Action,
-    ntIndexFor :: T.Text -> Int,
-    indexNTFor :: Int -> T.Text
-  }
-
-data RNNGState where
-  RNNGState ::
-    {
-      -- | stackをTensorで保存. 逆順で積まれる
-      stack :: [Tensor],
-      -- | stackを文字列で保存. 逆順で積まれる
-      textStack :: [T.Text],
-
-      -- | TODO: (h, c)の順にする（hasktorch-toolsに追従）
-      -- | stack lstmの隠れ状態の記録　(c, h)
-      hiddenStack :: [(Tensor, Tensor)],
-      -- | bufferをTensorで保存. 正順で積まれる
-      buffer :: [Tensor],
-      -- | bufferを文字列で保存. 正順で積まれる
-      textBuffer :: [T.Text],
-
-      -- | action historyをTensorで保存. 逆順で積まれる
-      actionHistory :: [Tensor],
-      -- | action historyを文字列で保存. 逆順で積まれる
-      textActionHistory :: [Action],
-      -- | 現在のaction historyの隠れ層. push飲み行われるので最終層だけ常に保存.
-      hiddenActionHistory :: Tensor,
-
-      -- | 開いているNTの数
-      numOpenParen :: Int
-    } ->
-    RNNGState 
-  deriving (Show)
-
+{-
+mask Forbidden actions
+-}
 
 checkNTForbidden ::
   RNNGState ->
@@ -214,6 +83,10 @@ maskImpossibleAction prediction rnngState IndexData {..}  =
       boolTensor = maskTensor rnngState actions
   in maskedFill prediction boolTensor (1e-38::Float)
 
+
+{-
+  RNNG Forward
+-}
 
 predictNextAction ::
   RNNG ->
@@ -312,7 +185,6 @@ parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE
       numOpenParen = numOpenParen - 1
     }
 
-
 predict ::
   RuntimeMode ->
   RNNG ->
@@ -339,6 +211,7 @@ predict Eval rnng IndexData {..} _ predictionHitory RNNGState {..} =
         action = indexActionFor (asValue (argmax (Dim 0) RemoveDim prediction)::Int)
         newRNNGState = parse rnng IndexData {..} RNNGState {..} action
     in predict Eval rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
+
 
 rnngForward ::
   RuntimeMode ->
@@ -393,16 +266,21 @@ evaluate rnng IndexData {..} batches = do
           answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
           output = rnngForward Train rnng IndexData {..} batch
           prediction = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
+          predictionSize = shape prediction !! 0
+          answerSize = shape answer !! 0
           -- | lossの計算は答えと推論結果の系列長が同じ時だけ
-          loss = if shape predictionSize == shape answerSize
+          loss = if shape prediction == shape answer
                   then nllLoss' answer (Torch.stack (Dim 0) output)
                   else asTensor (0::Float)
           (alignedPrediction, alignedAnswer) = aligned prediction answer
-          numCorrect = asValue (sumAll $ eq alignedAnswer alignedPredicted)::Int
+          numCorrect = asValue (sumAll $ eq alignedAnswer alignedPrediction)::Int
           accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictionSize)::Float
           predictionActions = fmap indexActionFor (asValue prediction::[Int])
       return (rnng', (accuracy, (asValue loss::Float), predictionActions))
 
+{-
+  Util function for RNNG
+-}
 
 sampleRandomData ::
   -- | 取り出したいデータ数
@@ -455,6 +333,7 @@ printResult result = forM_ result \(RNNGSentence (words, actions), predition) ->
   putStrLn $ "Prediction: " ++ show predition
   putStrLn "----------------------------------"
   return ()
+
 
 main :: IO()
 main = do
