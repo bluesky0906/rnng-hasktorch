@@ -517,14 +517,14 @@ main = do
       putStrLn $ "Epoch #" ++ show epoch 
       putStrLn $ "Training Loss: " ++ show trainingLoss
 
-      when (epoch `mod` 5 == 0) $ do
-        let answers = fmap (\(RNNGSentence (_, actions)) -> actions) validationData
-            (validationAcc, validationLoss, validationPrediction) = evaluate updated indexData validationData answers
-        putStrLn $ "Validation Accuracy: " ++ show validationAcc
-        putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
-        sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
-        putStrLn "======================================"
-      return ((updated, opts), trainingLoss)
+      -- when (epoch `mod` 5 == 0) $ do
+      let answers = fmap (\(RNNGSentence (_, actions)) -> actions) validationData
+          (validationAcc, validationLoss, validationPrediction) = evaluate updated indexData validationData answers
+      putStrLn $ "Validation Accuracy: " ++ show validationAcc
+      putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
+      sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
+      putStrLn "======================================"
+      return ((updated, opts), validationLoss)
 
   -- | model保存
   Torch.Train.saveParams trained modelFilePath
