@@ -5,7 +5,8 @@
 {-# LANGUAGE DeriveAnyClass #-}
 
 module Model.RNNG where
-import PTB
+import Data.CFG
+import Data.RNNGSentence
 import Torch hiding (take)
 -- | hasktorch-tools
 import Torch.Layer.RNN (RNNHypParams(..), RNNParams)
@@ -28,7 +29,7 @@ data RNNGSpec = RNNGSpec {
 
 
 {-
-RNNG model
+  RNNG model
 -}
 
 data PredictActionRNNG where
@@ -115,7 +116,7 @@ instance
 
 
 {-
-Data Structure for RNNG
+  Data Structure for RNNG
 -}
 
 data IndexData = IndexData {

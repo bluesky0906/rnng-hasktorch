@@ -1,21 +1,16 @@
 {-# LANGUAGE DeriveGeneric #-}
 
 module Util where
-import PTB 
 import qualified Data.Text as T  
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.List.Split (chunksOf, splitEvery) --split
 import Data.List as L
 import Data.Ord
-import ML.Util.Dict (sortWords)
 
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
 import Dhall hiding ( map )
 
-extractSentences :: [RNNGSentence] -> [Sentence]
-extractSentences [] = []
-extractSentences ((RNNGSentence (words, _)):rest) = words:(extractSentences rest)
 
 maxLengthFor :: [[a]] -> Int
 maxLengthFor list = length $ L.maximumBy (comparing length) list
@@ -31,36 +26,6 @@ indexForBatch indexFor input =
   fmap (padding $ maxLengthFor input) indices
   where
     indices = fmap (fmap indexFor) input
-
-toWordList :: [RNNGSentence] -> [T.Text]
-toWordList [] = []
-toWordList ((RNNGSentence (words, _)):rest) = words ++ toWordList rest
-
-toActionList :: [RNNGSentence] -> [Action]
-toActionList [] = []
-toActionList ((RNNGSentence (_, actions)):rest) = actions ++ toActionList rest
-
-extractNT :: [Action] -> [T.Text]
-extractNT [] = []
-extractNT ((NT label):rest) = label:(extractNT rest)
-extractNT (_:rest) = extractNT rest
-
-toNTList :: [RNNGSentence] -> [T.Text]
-toNTList [] = []
-toNTList ((RNNGSentence (_, actions)):rest) = extractNT actions ++ toNTList rest
-
-buildVocab :: 
-  (Ord a) =>
-  -- | training data
-  [RNNGSentence] ->
-  -- | 出現頻度threshold
-  Int ->
-  -- | 語彙リストを作る関数
-  ([RNNGSentence] -> [a])
-  -- | 一意な語彙リスト
-  -> [a]
-buildVocab rnngData freq toList = sortWords freq (toList rnngData)
-
 
 indexFactory :: (Ord a, Eq a) =>
   -- | 単語列

@@ -2,7 +2,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
-module PTB where
+module Data.CFG where
+import Data.RNNGSentence
 import GHC.Generics
 import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
@@ -13,7 +14,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Yaml             as Y --yaml
 import Data.List as L
 import Debug.Trace
-import Text.Parsec
+import Text.Parsec      --parsec
 import Text.Parsec.Text --parsec
 import Data.Store --seralisation
 
@@ -25,38 +26,6 @@ data CFGtree =
 
 instance A.FromJSON CFGtree
 instance A.ToJSON CFGtree
-
-data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic, Ord)
-type Sentence = [T.Text]
-
-showAction :: Action -> T.Text
-showAction (NT label) = (T.pack "NT_") <> label
-showAction SHIFT = T.pack "SHIFT"
-showAction REDUCE = T.pack "REDUCE"
-showAction ERROR = T.pack "ERROR"
-
-instance Store Action
-instance A.FromJSON Action
-instance A.ToJSON Action
-
-newtype RNNGSentence = RNNGSentence (Sentence, [Action]) deriving (Eq, Show, Generic)
-
-instance Store RNNGSentence
-instance A.FromJSON RNNGSentence
-instance A.ToJSON RNNGSentence
-
-unpackRNNGSentence :: RNNGSentence -> (Sentence, [Action])
-unpackRNNGSentence (RNNGSentence (words, actions)) = (words, actions)
-
-saveActionsToBinary :: FilePath -> [RNNGSentence] -> IO()
-saveActionsToBinary filepath actions = B.writeFile filepath (encode actions)
-
-loadActionsFromBinary :: FilePath -> IO [RNNGSentence]
-loadActionsFromBinary filepath = do
-  binary <- B.readFile filepath
-  case decode binary of
-    Left peek_exception -> error $ "Could not parse dic file " ++ filepath ++ ": " ++ (show peek_exception)
-    Right actions -> return actions
 
 
 traverseCFGs :: [CFGtree] -> [RNNGSentence]

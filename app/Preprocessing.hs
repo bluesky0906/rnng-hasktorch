@@ -1,6 +1,7 @@
 module Preprocessing where
 
-import PTB
+import Data.CFG
+import Data.RNNGSentence
 import Util (configLoad, Config(..))
 import Options.Applicative
 import qualified Data.Text as T          --text

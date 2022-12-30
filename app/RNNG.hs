@@ -4,7 +4,8 @@
 
 module RNNG where
 import Model.RNNG
-import PTB
+import Data.CFG
+import Data.RNNGSentence
 import Util
 import Torch hiding (foldLoop, take, repeat)
 -- | hasktorch-tools
