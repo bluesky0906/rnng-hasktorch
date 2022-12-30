@@ -9,13 +9,13 @@
 module RNNG where
 import PTB
 import Util
-import Torch hiding (foldLoop, take)
+import Torch hiding (foldLoop, take, repeat)
 -- | hasktorch-tools
 import Torch.Layer.RNN (RNNHypParams(..), RNNParams, rnnLayer)
 import Torch.Layer.BiLSTM (BiLstmHypParams(..), BiLstmParams, biLstmLayers)
 import Torch.Layer.LSTM (LstmHypParams(..), LstmParams, lstmLayer)
 import Torch.Layer.Linear
-import Torch.Control (mapAccumM, foldLoop)
+import Torch.Control (mapAccumM, foldLoop, makeBatch)
 import Torch.Train (update, saveParams, loadParams)
 -- | nlp-tools
 import ML.Exp.Chart (drawLearningCurve)
@@ -396,6 +396,7 @@ evaluate rnng IndexData {..} batches answers =
       size = fromIntegral (length answers)::Float
   in (acc / size, losses / size, reverse predictions)
 
+
 sampleRandomData ::
   -- | 取り出したいデータ数
   Int ->
@@ -407,6 +408,35 @@ sampleRandomData size xs = do
   gen <- newStdGen
   let randomIdxes = Data.List.take size $ nub $ randomRs (0, (length xs) - 1) gen
   return $ map (xs !!) randomIdxes
+
+
+makeBatch' ::
+  Int ->
+  Int ->
+  [RNNGSentence] ->
+  IO [[RNNGSentence]]
+makeBatch' batchSize numOfBatches xs = do
+  -- 最後のbatchが足りなかったら埋める
+  newLastBatch <- if length lastBatch < batchSize
+                    then do
+                      sampled <- sampleRandomData (batchSize - length lastBatch) xs
+                      return $ lastBatch ++ sampled
+                    else return lastBatch
+  adjustSize $ (take (length batches - 1) batches) ++ [newLastBatch]
+  where 
+    batches = makeBatch batchSize xs
+    lastBatch = last batches
+    adjustSize :: [[RNNGSentence]] -> IO [[RNNGSentence]]
+    adjustSize list =
+      case length list of
+          -- | numOfBatches に届かなかったらランダムに取ってきて足す
+        _ | length list < numOfBatches -> do
+              sampledBatches <- sequence $ take (numOfBatches - (length list)) $ repeat (sampleRandomData batchSize xs) 
+              return $ list ++ sampledBatches
+          -- | 多かったら削る
+          | length list > numOfBatches -> return $ take numOfBatches list
+          | otherwise           -> return list
+
 
 printResult ::
   [(RNNGSentence, [Action])] ->
@@ -435,6 +465,7 @@ main = do
       learningRate = toDevice myDevice $ asTensor (getLearningRate config)
       modelFilePath = getModelFilePath config
       graphFilePath = getGraphFilePath config
+      batchSize = 100 -- | まとめて学習はできないので、batchではない
       optim = GD
   -- data
   trainingData <- loadActionsFromBinary $ getTrainingDataPath config
@@ -451,6 +482,7 @@ main = do
       (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 0 toActionList) ERROR Nothing
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 0 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
+      
   putStrLn $ "WordEmbDim: " ++ show wordEmbDim
   putStrLn $ "ActionEmbDim: " ++ show actionEmbDim
   putStrLn $ "NTEmbDim: " ++ show ntEmbDim
@@ -458,16 +490,16 @@ main = do
 
   let rnngSpec = RNNGSpec myDevice wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
   initRNNGModel <- toDevice myDevice <$> sample rnngSpec
+  batches <- makeBatch' batchSize iter dataForTraining
 
   -- | training
   ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
     \epoch (rnng, (opt1, opt2, opt3)) -> do
-      -- |　毎epochごとに100ずつサンプリング
-      batches <- sampleRandomData 100 dataForTraining 
+      let rnngSentences = batches !! (epoch - 1)
 
-      ((updated, opts), batchLosses) <- mapAccumM batches (rnng, (opt1, opt2, opt3)) $ 
-        \batch (rnng', (opt1', opt2', opt3')) -> do
-          let RNNGSentence (sents, actions) = batch
+      ((updated, opts), batchLosses) <- mapAccumM rnngSentences (rnng, (opt1, opt2, opt3)) $ 
+        \rnngSentence (rnng', (opt1', opt2', opt3')) -> do
+          let RNNGSentence (sents, actions) = rnngSentence
               answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
           dropoutOutput <- forM output (dropout 0.2 True) 
