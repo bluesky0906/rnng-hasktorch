@@ -4,6 +4,7 @@
 
 module Data.CFG where
 import Data.RNNGSentence
+import Data.SyntaxTree
 import GHC.Generics
 import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
@@ -18,80 +19,25 @@ import Text.Parsec      --parsec
 import Text.Parsec.Text --parsec
 import Data.Store --seralisation
 
-data CFGtree = 
-  Phrase (T.Text, [CFGtree]) 
-  | Word T.Text
-  | Err String T.Text 
-  deriving (Eq, Show, Generic)
 
-instance A.FromJSON CFGtree
-instance A.ToJSON CFGtree
+{-
 
+parse text file to CFGTree
 
-traverseCFGs :: [CFGtree] -> [RNNGSentence]
-traverseCFGs = map (reverseRNNGSentence . traverseCFG (RNNGSentence ([], [])))
+-}
 
-reverseRNNGSentence :: RNNGSentence -> RNNGSentence
-reverseRNNGSentence (RNNGSentence (words, actions)) = RNNGSentence ((reverse words), (reverse actions))
-
-traverseCFG :: RNNGSentence -> CFGtree -> RNNGSentence
--- POSタグは無視する
-traverseCFG (RNNGSentence (words, actions)) (Phrase (_, Word word:rest)) =
-  RNNGSentence (word:words, SHIFT:actions)
-traverseCFG (RNNGSentence (words, actions)) (Phrase (label, trees)) =
-  RNNGSentence (newWords, REDUCE:newActions)
-  where
-    RNNGSentence (newWords, newActions) = L.foldl traverseCFG (RNNGSentence (words, NT label:actions)) trees
-traverseCFG (RNNGSentence (words, actions)) (Err message text)  = RNNGSentence (words, ERROR:actions)
-
-
-printCFGtrees :: [CFGtree] -> IO ()
-printCFGtrees cfgTree = do
-  T.putStrLn $ T.unlines $ map (formatCFGtree 0) cfgTree
-
-formatCFGtree :: Int -> CFGtree -> T.Text
-formatCFGtree depth (Phrase (label, (Word word):rest)) =
-  T.concat [
-    T.replicate depth (T.pack "\t"),
-    T.pack " (",
-    label,
-    T.pack " ",
-    word,
-    T.pack " )"
-  ]
-formatCFGtree depth (Phrase (label, tree)) =
-  T.concat [
-    T.replicate depth (T.pack "\t"),
-    T.pack " (",
-    label,
-    T.pack "\n",
-    T.intercalate (T.pack "\n") $ map (formatCFGtree (depth + 1)) tree,
-    T.pack " )"
-  ]
-formatCFGtree depth (Err msg text) =
-  T.intercalate (T.pack "\n") [
-    T.pack $ "Parse Error: " ++ msg ++ " in ",
-    text
-  ]
-
-isErr :: CFGtree -> Bool
-isErr cfg = case cfg of
-  Word _ -> False
-  Phrase _ -> False
-  Err _ _ -> True
-
-parsePTBfile :: FilePath -> IO [CFGtree]
-parsePTBfile ptbFilePath = do
+parseCFGfile :: FilePath -> IO [Tree]
+parseCFGfile ptbFilePath = do
   ptb <- T.readFile ptbFilePath
   return $ parseCFGtrees ptb
 
-parseCFGtrees :: T.Text -> [CFGtree]
+parseCFGtrees :: T.Text -> [Tree]
 parseCFGtrees text =
   case parse cfgsParser "" text of
     Left e -> [Err (show e) text]
     Right t -> t
 
-cfgsParser :: Parser [CFGtree]
+cfgsParser :: Parser [Tree]
 cfgsParser = do
   _ <- optional blank
   _ <- optional $ string copyRight
@@ -99,7 +45,7 @@ cfgsParser = do
   trees <- sepBy1' cfgParser blank
   return trees
 
-cfgParser :: Parser CFGtree
+cfgParser :: Parser Tree
 cfgParser = do
   openParen
   optional blank
@@ -121,7 +67,7 @@ openParen = T.singleton <$> char '('
 closeParen :: Parser T.Text
 closeParen = T.singleton <$> char ')'
 
-phraseParser :: Parser CFGtree
+phraseParser :: Parser Tree
 phraseParser = do
   openParen
   label <- literal
@@ -130,7 +76,7 @@ phraseParser = do
   closeParen <|> (blank >> closeParen)
   return $ Phrase (label, tree)
 
-wordParser :: Parser CFGtree
+wordParser :: Parser Tree
 wordParser = do
   word <- literal
   return $ Word word

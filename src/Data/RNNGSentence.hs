@@ -16,6 +16,9 @@ import Data.Store --seralisation
 import ML.Util.Dict (sortWords)
 
 
+data Grammar = CFG | CCG deriving (Show, Read)
+
+
 data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic, Ord)
 type Sentence = [T.Text]
 
@@ -34,6 +37,9 @@ newtype RNNGSentence = RNNGSentence (Sentence, [Action]) deriving (Eq, Show, Gen
 instance Store RNNGSentence
 instance A.FromJSON RNNGSentence
 instance A.ToJSON RNNGSentence
+
+reverseRNNGSentence :: RNNGSentence -> RNNGSentence
+reverseRNNGSentence (RNNGSentence (words, actions)) = RNNGSentence ((reverse words), (reverse actions))
 
 saveActionsToBinary :: FilePath -> [RNNGSentence] -> IO()
 saveActionsToBinary filepath actions = B.writeFile filepath (encode actions)

@@ -1,6 +1,7 @@
 module Preprocessing where
-
+import Data.SyntaxTree
 import Data.CFG
+import Data.CCG
 import Data.RNNGSentence
 import Util (configLoad, Config(..))
 import Options.Applicative
@@ -11,54 +12,72 @@ import Text.Directory (checkFile, getFileList) --nlp-tools
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory) --directory
 
 {-
-  PennTreeBankのデータを前処理する
+
+  PennTreeBank, CCGBank のデータを前処理する
+
 -}
 
-newtype PreprocessingOpt = PreprocessingOpt
+data PreprocessingOpt = PreprocessingOpt
   {
-    path :: FilePath
+    path :: FilePath,
+    grammar :: Grammar
   } deriving (Show)
 
 preprocess :: Parser PreprocessingOpt
 preprocess = PreprocessingOpt
-  <$> strOption
-  ( long "path"
-  <> short 'p' 
-  )
+  <$> strOption ( long "path" <> short 'p' <> help "path to WSJ" )
+  <*> option auto ( long "grammar" <> short 'g' <> help "CFG or CCG" )
 
 opts :: ParserInfo PreprocessingOpt
 opts = info (preprocess <**> helper)
   ( fullDesc
-  <> progDesc "Path of WSJ PennTreeBank data" )
+  <> progDesc "Path of WSJ PennTreeBank data" 
+  <> progDesc "Grammar used by RNNG" 
+  )
 
-listFiles :: String -> IO [String]
-listFiles p = do
+listFiles ::
+  Grammar ->
+  String ->
+  IO [String]
+listFiles grammar p = do
+  let suffix = case grammar of
+                CFG -> "mrg"
+                CCG -> "auto"
   isFile <- doesFileExist p
-  if isFile then return [p] else getFileList "mrg" p
+  if isFile then return [p] else getFileList suffix p
 
-saveActionData :: [FilePath] -> FilePath -> IO()
-saveActionData dirsPath outputPath = do
+saveActionData ::
+  Grammar ->
+  [FilePath] -> 
+  FilePath ->
+  IO()
+saveActionData grammar dirsPath outputPath = do
   -- 指定されたディレクトリ以下のファイルを取得
-  filePaths <- fmap concat $ traverse id $ fmap listFiles dirsPath 
+  filePaths <- fmap concat $ traverse id $ fmap (listFiles grammar) dirsPath 
   --readmeは除外
-  cfgTreess <- mapM parsePTBfile $ filter (\f -> takeBaseName f /= "readme") filePaths
-  let cfgTrees = concat cfgTreess
-  let parsedCfgTrees = filter (not . isErr) $ cfgTrees
-  mapM_ (putStrLn . show) $ filter isErr $ cfgTrees
-  let rnngSentence = traverseCFGs parsedCfgTrees
+  treess <- mapM (parseTreefile grammar) $ filter (\f -> takeBaseName f /= "readme") filePaths
+  let trees = concat treess
+      parsedTrees = filter (not . isErr) $ trees
+  mapM_ (putStrLn . show) $ filter isErr $ trees
+  let rnngSentence = traverseTrees parsedTrees
   saveActionsToBinary outputPath rnngSentence
   -- content <- loadActionsFromBinary outputPath
   return ()
+  where
+    parseTreefile CFG = parseCFGfile
+    parseTreefile CCG = parseCCGfile
+
 
 main :: IO()
 main = do
   options <- execParser opts
   config <- configLoad
   let wsjDirPath = path options
+      rnngGrammar = grammar options
       trainingDataDirs = fmap (wsjDirPath ++) ["02/", "03/", "04/", "05/", "06/", "07/", "08/", "09/", "10/", "11/", "12/", "13/", "14/", "15/", "16/", "17/", "18/", "19/", "20/", "21/"]
       validationDataDirs = fmap (wsjDirPath ++) ["24/"]
       evaluationDataDirs = fmap (wsjDirPath ++) ["23/"]
-  -- saveActionData trainingDataDirs $ trainingDataPath config
-  saveActionData validationDataDirs $ getValidationDataPath config
-  saveActionData evaluationDataDirs $ getEvaluationDataPath config
+  -- saveActionData rnngGrammar trainingDataDirs $ (getTrainingDataPath config) ++ show rnngGrammar
+  -- saveActionData rnngGrammar evaluationDataDirs $ (getEvaluationDataPath config) ++ show rnngGrammar
+  saveActionData rnngGrammar validationDataDirs $ (getValidationDataPath config) ++ show rnngGrammar
   return ()

@@ -4,6 +4,7 @@
 
 module Data.CCG where
 import Data.RNNGSentence
+import Data.SyntaxTree
 import GHC.Generics
 import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
@@ -21,136 +22,25 @@ import Debug.Trace
 
 {-
 
-define data structure
-
--}
-
-data CCGTree = 
-  Phrase (T.Text, [CCGTree]) 
-  | Word T.Text
-  | Err String T.Text 
-  deriving (Eq, Show, Generic)
-
-instance A.FromJSON CCGTree
-instance A.ToJSON CCGTree
-
-
-{-
-
-save and load data
-
--}
-
-saveActionsToBinary :: FilePath -> [RNNGSentence] -> IO()
-saveActionsToBinary filepath actions = B.writeFile filepath (encode actions)
-
-loadActionsFromBinary :: FilePath -> IO [RNNGSentence]
-loadActionsFromBinary filepath = do
-  binary <- B.readFile filepath
-  case decode binary of
-    Left peek_exception -> error $ "Could not parse dic file " ++ filepath ++ ": " ++ (show peek_exception)
-    Right actions -> return actions
-
-
-{-
-
-util function
-
--}
-
-isErr :: CCGTree -> Bool
-isErr ccg = case ccg of
-  Word _ -> False
-  Phrase _ -> False
-  Err _ _ -> True
-
-
-showAction :: Action -> T.Text
-showAction (NT label) = (T.pack "NT_") <> label
-showAction SHIFT = T.pack "SHIFT"
-showAction REDUCE = T.pack "REDUCE"
-showAction ERROR = T.pack "ERROR"
-
-
-{-
-
-traverse CCGTree to RNNGSentence
-
--}
-
-traverseCCGs :: [CCGTree] -> [RNNGSentence]
-traverseCCGs = map (reverseRNNGSentence . traverseCCG (RNNGSentence ([], [])))
-
-reverseRNNGSentence :: RNNGSentence -> RNNGSentence
-reverseRNNGSentence (RNNGSentence (words, actions)) = RNNGSentence ((reverse words), (reverse actions))
-
-traverseCCG :: RNNGSentence -> CCGTree -> RNNGSentence
-traverseCCG (RNNGSentence (words, actions)) (Word word) =
-  RNNGSentence (word:words, SHIFT:actions)
-traverseCCG (RNNGSentence (words, actions)) (Phrase (label, trees)) =
-  RNNGSentence (newWords, REDUCE:newActions)
-  where
-    RNNGSentence (newWords, newActions) = L.foldl traverseCCG (RNNGSentence (words, NT label:actions)) trees
-traverseCCG (RNNGSentence (words, actions)) (Err message text)  = RNNGSentence (words, ERROR:actions)
-
-
-{-
-
-pretty printing of CCGTree
-
--}
-
-printCCGTrees :: [CCGTree] -> IO ()
-printCCGTrees ccgTree =
-  T.putStrLn $ T.unlines $ map (formatCCGTree 0) ccgTree
-
-formatCCGTree :: Int -> CCGTree -> T.Text
-formatCCGTree depth (Phrase (label, (Word word):rest)) =
-  T.concat [
-    T.replicate depth (T.pack "\t"),
-    T.pack " (",
-    label,
-    T.pack " ",
-    word,
-    T.pack " )"
-  ]
-formatCCGTree depth (Phrase (label, tree)) =
-  T.concat [
-    T.replicate depth (T.pack "\t"),
-    T.pack " (",
-    label,
-    T.pack "\n",
-    T.intercalate (T.pack "\n") $ map (formatCCGTree (depth + 1)) tree,
-    T.pack " )"
-  ]
-formatCCGTree depth (Err msg text) =
-  T.intercalate (T.pack "\n") [
-    T.pack $ "Parse Error: " ++ msg ++ " in ",
-    text
-  ]
-
-
-{-
-
 parse text file to CCGTree
 
 -}
 
-parseCCGfile :: FilePath -> IO [CCGTree]
+parseCCGfile :: FilePath -> IO [Tree]
 parseCCGfile ptbFilePath = do
   ptb <- T.readFile ptbFilePath
   return $ parseCCGTrees ptb
 
-parseCCGTrees :: T.Text -> [CCGTree]
+parseCCGTrees :: T.Text -> [Tree]
 parseCCGTrees text =
   case parse ccgsParser "" text of
     Left e -> [Err (show e) text]
     Right t -> t
 
-ccgsParser :: Parser [CCGTree]
+ccgsParser :: Parser [Tree]
 ccgsParser = many1 ccgParser
 
-ccgParser :: Parser CCGTree
+ccgParser :: Parser Tree
 ccgParser = do
   ignoreSentenceInfo
   tree <- try nonLeafParser <|> leafParser
@@ -183,7 +73,7 @@ openAngleBracket = T.singleton <$> char '<'
 closeAngleBracket :: Parser T.Text
 closeAngleBracket = T.singleton <$> char '>'
 
-leafParser :: Parser CCGTree
+leafParser :: Parser Tree
 leafParser = do
   openParen
   openAngleBracket
@@ -201,9 +91,9 @@ leafParser = do
   closeAngleBracket
   closeParen
   blank
-  return $ Word word
+  return $ Phrase (category, [Word word])
 
-nonLeafParser :: Parser CCGTree
+nonLeafParser :: Parser Tree
 nonLeafParser = do
   openParen
   openAngleBracket
