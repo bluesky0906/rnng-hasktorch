@@ -1,27 +1,26 @@
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE BlockArguments #-}
 
 
 module RNNG where
-import PTB
+import Model.RNNG
+import Data.CFG
+import Data.RNNGSentence
 import Util
-import Torch hiding (foldLoop)
+import Torch hiding (foldLoop, take, repeat)
 -- | hasktorch-tools
-import Torch.Layer.RNN (RNNHypParams(..), RNNParams, rnnLayer)
-import Torch.Layer.BiLSTM (BiLstmHypParams(..), BiLstmParams, biLstmLayers)
-import Torch.Layer.LSTM (LstmHypParams(..), LstmParams, lstmLayer)
-import Torch.Layer.Linear
-import Torch.Control (mapAccumM, foldLoop)
+import Torch.Layer.RNN (RNNParams, rnnLayer)
+import Torch.Layer.BiLSTM (BiLstmParams, biLstmLayers)
+import Torch.Layer.LSTM (LstmParams, lstmLayer)
+import Torch.Layer.Linear (linearLayer)
+import Torch.Control (mapAccumM, makeBatch)
 import Torch.Train (update, saveParams, loadParams)
 -- | nlp-tools
 import ML.Exp.Chart (drawLearningCurve)
 
-import GHC.Generics
 import qualified Data.Text as T 
 import Data.List
+import Data.Functor
 import Debug.Trace
 import System.Random
 import Control.Monad
@@ -29,137 +28,10 @@ import Control.Monad
 myDevice :: Device
 myDevice = Device CUDA 0
 
-data RNNGSpec = RNNGSpec {
-  modelDevice :: Device,
-  wordEmbedSize :: Int,
-  actionEmbedSize :: Int,
-  wordNumEmbed :: Int,
-  actionNumEmbed :: Int,
-  ntNumEmbed :: Int,
-  hiddenSize :: Int
-} deriving (Show, Eq)
 
-
-data PredictActionRNNG where
-  PredictActionRNNG :: {
-    bufferRNN :: RNNParams,
-    bufferh0 :: Parameter,
-    w :: Parameter,
-    c :: Parameter,
-    linearParams :: LinearParams
-    } ->
-    PredictActionRNNG
-  deriving (Show, Generic, Parameterized)
-
-data ParseRNNG where
-  ParseRNNG ::
-    {
-      wordEmbedding :: Parameter,
-      ntEmbedding :: Parameter,
-      actionEmbedding :: Parameter,
-      stackLSTM :: LstmParams,
-      stackh0 :: Parameter,
-      stackc0 :: Parameter,
-      actionRNN :: RNNParams,
-      actionh0 :: Parameter,
-      actionStart :: Parameter, -- dummy for empty action history
-      bufferGuard :: Parameter, -- dummy for empty buffer
-      stackGuard :: Parameter  -- dummy for empty stack
-    } ->
-    ParseRNNG
-  deriving (Show, Generic, Parameterized)
-
-data CompRNNG where
-  CompRNNG ::
-    {
-      compLSTM :: BiLstmParams,
-      comph0 :: Parameter,
-      compc0 :: Parameter
-    } ->
-    CompRNNG
-  deriving (Show, Generic, Parameterized)
-
-
-data RNNG where
-  RNNG ::
-    {
-      predictActionRNNG :: PredictActionRNNG,
-      parseRNNG :: ParseRNNG,
-      compRNNG :: CompRNNG
-    } ->
-    RNNG
-  deriving (Show, Generic, Parameterized)
-
-instance
-  Randomizable
-    RNNGSpec
-    RNNG
-  where
-    sample RNNGSpec {..} = do
-      predictActionRNNG <- PredictActionRNNG
-        <$> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize * 3, hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> sample (LinearHypParams modelDevice hiddenSize actionNumEmbed)
-      parseRNNG <- ParseRNNG
-        <$> (makeIndependent =<< randnIO' [wordNumEmbed, wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [ntNumEmbed, wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [actionNumEmbed, wordEmbedSize])
-        <*> sample (LstmHypParams modelDevice hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [actionEmbedSize])
-        <*> (makeIndependent =<< randnIO' [wordEmbedSize])
-        <*> (makeIndependent =<< randnIO' [wordEmbedSize])
-      compRNNG <- CompRNNG
-        <$> sample (BiLstmHypParams modelDevice 1 hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-      return $ RNNG predictActionRNNG parseRNNG compRNNG
-
-
-
-data IndexData = IndexData {
-    wordIndexFor :: T.Text -> Int,
-    indexWordFor :: Int -> T.Text,
-    actionIndexFor :: Action -> Int,
-    indexActionFor :: Int -> Action,
-    ntIndexFor :: T.Text -> Int,
-    indexNTFor :: Int -> T.Text
-  }
-
-data RNNGState where
-  RNNGState ::
-    {
-      -- | stackをTensorで保存. 逆順で積まれる
-      stack :: [Tensor],
-      -- | stackを文字列で保存. 逆順で積まれる
-      textStack :: [T.Text],
-
-      -- | TODO: (h, c)の順にする（hasktorch-toolsに追従）
-      -- | stack lstmの隠れ状態の記録　(c, h)
-      hiddenStack :: [(Tensor, Tensor)],
-      -- | bufferをTensorで保存. 正順で積まれる
-      buffer :: [Tensor],
-      -- | bufferを文字列で保存. 正順で積まれる
-      textBuffer :: [T.Text],
-
-      -- | action historyをTensorで保存. 逆順で積まれる
-      actionHistory :: [Tensor],
-      -- | action historyを文字列で保存. 逆順で積まれる
-      textActionHistory :: [Action],
-      -- | 現在のaction historyの隠れ層. push飲み行われるので最終層だけ常に保存.
-      hiddenActionHistory :: Tensor,
-
-      -- | 開いているNTの数
-      numOpenParen :: Int
-    } ->
-    RNNGState 
-  deriving (Show)
-
+{-
+mask Forbidden actions
+-}
 
 checkNTForbidden ::
   RNNGState ->
@@ -207,11 +79,15 @@ maskImpossibleAction ::
   RNNGState ->
   IndexData ->
   Tensor
-maskImpossibleAction predicted rnngState IndexData {..}  =
-  let actions = map indexActionFor [0..((shape predicted !! 0) - 1)]
+maskImpossibleAction prediction rnngState IndexData {..}  =
+  let actions = map indexActionFor [0..((shape prediction !! 0) - 1)]
       boolTensor = maskTensor rnngState actions
-  in maskedFill predicted boolTensor (1e-38::Float)
+  in maskedFill prediction boolTensor (1e-38::Float)
 
+
+{-
+  RNNG Forward
+-}
 
 predictNextAction ::
   RNNG ->
@@ -310,7 +186,6 @@ parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE
       numOpenParen = numOpenParen - 1
     }
 
-
 predict ::
   RuntimeMode ->
   RNNG ->
@@ -324,19 +199,20 @@ predict ::
   -- | (predicted actions, new rnngState)
   ([Tensor], RNNGState)
 predict Train _ _ [] results rnngState = (reverse results, rnngState)
-predict Train rnng indexData (action:rest) predictedHitory rnngState =
-  let predicted = predictNextAction rnng rnngState indexData
+predict Train rnng indexData (action:rest) predictionHitory rnngState =
+  let prediction = predictNextAction rnng rnngState indexData
       newRNNGState = parse rnng indexData rnngState action
-  in predict Train rnng indexData rest (predicted:predictedHitory) newRNNGState
+  in predict Train rnng indexData rest (prediction:predictionHitory) newRNNGState
 
-predict Eval rnng IndexData {..} _ predictedHitory RNNGState {..} =
+predict Eval rnng IndexData {..} _ predictionHitory RNNGState {..} =
   if ((length textStack) == 1) && ((length textBuffer) == 0)
-    then (reverse predictedHitory, RNNGState {..} )
+    then (reverse predictionHitory, RNNGState {..} )
   else
-    let predicted = predictNextAction rnng RNNGState {..} IndexData {..}
-        action = indexActionFor (asValue (argmax (Dim 0) RemoveDim predicted)::Int)
+    let prediction = predictNextAction rnng RNNGState {..} IndexData {..}
+        action = indexActionFor (asValue (argmax (Dim 0) RemoveDim prediction)::Int)
         newRNNGState = parse rnng IndexData {..} RNNGState {..} action
-    in predict Eval rnng IndexData {..}  [] (predicted:predictedHitory) newRNNGState
+    in predict Eval rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
+
 
 rnngForward ::
   RuntimeMode ->
@@ -360,46 +236,105 @@ rnngForward runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexDa
       }
   in fst $ predict runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
 
+
 evaluate ::
   RNNG ->
   IndexData ->
   [RNNGSentence] ->
-  -- | action answers
-  [[Action]] ->
   -- | (accuracy, loss, predicted action sequence)
-  (Float, [[Action]])
-evaluate rnng IndexData {..} batches answers =
-  let (acc, predicted) = foldLoop (zip batches answers) (0, []::[[Action]]) $ 
-        \(batch, answerActions) (acc', predicted') ->
-          let answer = toDevice myDevice $ asTensor $ fmap actionIndexFor answerActions
-              output = rnngForward Eval rnng IndexData {..} batch
-              predicted = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
-              -- | 推論したactionのサイズと異なる場合、-1で埋めて調整する
-              predictedSize = shape predicted !! 0
-              answerSize = shape answer !! 0
-              alignedPredicted = if predictedSize < answerSize
-                                  then cat (Dim 0) [predicted, toDevice myDevice $ asTensor ((replicate (answerSize - predictedSize) (-1))::[Int])]
-                                  else predicted
-              alignedAnswer = if predictedSize > answerSize
-                                then cat (Dim 0) [answer, toDevice myDevice $ asTensor ((replicate (predictedSize - answerSize) (-1))::[Int])]
-                                else answer
-              numCorrect = asValue (sumAll $ eq alignedAnswer alignedPredicted)::Int
-              accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictedSize)::Float
-              predictedActions = fmap indexActionFor (asValue predicted::[Int])
-          in (accuracy + acc', predictedActions:predicted')
-  in (acc / fromIntegral (length answers)::Float, predicted)
+  IO (Float, Float, [[Action]])
+evaluate rnng IndexData {..} batches = do
+  (_, result) <- mapAccumM batches rnng step
+  let (acc, losses, predictions) = unzip3 result
+      size = fromIntegral (length batches)::Float
+  return ((sum acc) / size, (sum losses) / size, reverse predictions)
+  where 
+    -- | 推論したactionのサイズと異なる場合、-1で埋めて調整する
+    aligned :: Tensor -> Tensor -> (Tensor, Tensor)
+    aligned prediction answer = 
+      let predictionSize = shape prediction !! 0
+          answerSize = shape answer !! 0
+          alignedPredicted = if predictionSize < answerSize
+                              then cat (Dim 0) [prediction, toDevice myDevice $ asTensor ((replicate (answerSize - predictionSize) (-1))::[Int])]
+                              else prediction
+          alignedAnswer = if predictionSize > answerSize
+                            then cat (Dim 0) [answer, toDevice myDevice $ asTensor ((replicate (predictionSize - answerSize) (-1))::[Int])]
+                            else answer
+      in (alignedPredicted, alignedAnswer)
+    step :: RNNGSentence -> RNNG -> IO (RNNG, (Float, Float, [Action]))
+    step batch rnng' = do
+      let RNNGSentence (sents, actions) = batch
+          answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
+          output = rnngForward Train rnng IndexData {..} batch
+          prediction = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
+          predictionSize = shape prediction !! 0
+          answerSize = shape answer !! 0
+          -- | lossの計算は答えと推論結果の系列長が同じ時だけ
+          loss = if shape prediction == shape answer
+                  then nllLoss' answer (Torch.stack (Dim 0) output)
+                  else asTensor (0::Float)
+          (alignedPrediction, alignedAnswer) = aligned prediction answer
+          numCorrect = asValue (sumAll $ eq alignedAnswer alignedPrediction)::Int
+          accuracy = (fromIntegral numCorrect::Float) / fromIntegral (Prelude.max answerSize predictionSize)::Float
+          predictionActions = fmap indexActionFor (asValue prediction::[Int])
+      return (rnng', (accuracy, (asValue loss::Float), predictionActions))
+
+{-
+  Util function for RNNG
+-}
 
 sampleRandomData ::
-  -- | データ
-  [RNNGSentence] ->
   -- | 取り出したいデータ数
   Int ->
+  -- | データ
+  [a] ->
   -- | サンプル結果
-  IO [RNNGSentence]
-sampleRandomData xs size = do
+  IO [a]
+sampleRandomData size xs = do
   gen <- newStdGen
   let randomIdxes = Data.List.take size $ nub $ randomRs (0, (length xs) - 1) gen
   return $ map (xs !!) randomIdxes
+
+
+makeBatch' ::
+  Int ->
+  Int ->
+  [RNNGSentence] ->
+  IO [[RNNGSentence]]
+makeBatch' batchSize numOfBatches xs = do
+  -- 最後のbatchが足りなかったら埋める
+  newLastBatch <- if length lastBatch < batchSize
+                    then do
+                      sampled <- sampleRandomData (batchSize - length lastBatch) xs
+                      return $ lastBatch ++ sampled
+                    else return lastBatch
+  adjustSize $ (take (length batches - 1) batches) ++ [newLastBatch]
+  where 
+    batches = makeBatch batchSize xs
+    lastBatch = last batches
+    adjustSize :: [[RNNGSentence]] -> IO [[RNNGSentence]]
+    adjustSize list =
+      case length list of
+          -- | numOfBatches に届かなかったらランダムに取ってきて足す
+        _ | length list < numOfBatches -> do
+              sampledBatches <- sequence $ take (numOfBatches - (length list)) $ repeat (sampleRandomData batchSize xs) 
+              return $ list ++ sampledBatches
+          -- | 多かったら削る
+          | length list > numOfBatches -> return $ take numOfBatches list
+          | otherwise           -> return list
+
+
+printResult ::
+  [(RNNGSentence, [Action])] ->
+  IO ()
+printResult result = forM_ result \(RNNGSentence (words, actions), predition) -> do
+  putStrLn "----------------------------------"
+  putStrLn $ "Sentence: " ++ show words
+  putStrLn $ "Actions:    " ++ show actions
+  putStrLn $ "Prediction: " ++ show predition
+  putStrLn "----------------------------------"
+  return ()
+
 
 main :: IO()
 main = do
@@ -407,6 +342,7 @@ main = do
   config <- configLoad
   putStrLn "Experiment Setting: "
   print config
+  putStrLn "======================================"
 
   let iter = fromIntegral (getEpoch config)::Int
       wordEmbedSize = fromIntegral (getWordEmbedSize config)::Int
@@ -416,37 +352,41 @@ main = do
       learningRate = toDevice myDevice $ asTensor (getLearningRate config)
       modelFilePath = getModelFilePath config
       graphFilePath = getGraphFilePath config
+      batchSize = 100 -- | まとめて学習はできないので、batchではない
       optim = GD
   -- data
   trainingData <- loadActionsFromBinary $ getTrainingDataPath config
   validationData <- loadActionsFromBinary $ getValidationDataPath config
   evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
   let dataForTraining = trainingData
-  print $ "Training Data Size: " ++ show (length trainingData)
-  print $ "Validation Data Size: " ++ show (length validationData)
-  print $ "Evaluation Data Size: " ++ show (length evaluationData)
+  putStrLn $ "Training Data Size: " ++ show (length trainingData)
+  putStrLn $ "Validation Data Size: " ++ show (length validationData)
+  putStrLn $ "Evaluation Data Size: " ++ show (length evaluationData)
+  putStrLn "======================================"
 
   -- create index data
   let (wordIndexFor, indexWordFor, wordEmbDim) = indexFactory (buildVocab dataForTraining 0 toWordList) (T.pack "unk") Nothing
       (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 0 toActionList) ERROR Nothing
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 0 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
-  print $ "WordEmbDim: " ++ show wordEmbDim
-  print $ "ActionEmbDim: " ++ show actionEmbDim
-  print $ "NTEmbDim: " ++ show ntEmbDim
+      
+  putStrLn $ "WordEmbDim: " ++ show wordEmbDim
+  putStrLn $ "ActionEmbDim: " ++ show actionEmbDim
+  putStrLn $ "NTEmbDim: " ++ show ntEmbDim
+  putStrLn "======================================"
 
   let rnngSpec = RNNGSpec myDevice wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
   initRNNGModel <- toDevice myDevice <$> sample rnngSpec
+  batches <- makeBatch' batchSize iter dataForTraining
 
   -- | training
   ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
     \epoch (rnng, (opt1, opt2, opt3)) -> do
-      -- |　毎epochごとに100ずつサンプリング
-      batches <- sampleRandomData dataForTraining 100
+      let rnngSentences = batches !! (epoch - 1)
 
-      ((updated, opts), batchLosses) <- mapAccumM batches (rnng, (opt1, opt2, opt3)) $ 
-        \batch (rnng', (opt1', opt2', opt3')) -> do
-          let RNNGSentence (sents, actions) = batch
+      ((updated, opts), batchLosses) <- mapAccumM rnngSentences (rnng, (opt1, opt2, opt3)) $ 
+        \rnngSentence (rnng', (opt1', opt2', opt3')) -> do
+          let RNNGSentence (sents, actions) = rnngSentence
               answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
           dropoutOutput <- forM output (dropout 0.2 True) 
@@ -461,25 +401,26 @@ main = do
           return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (opt1'', opt2'', opt3'')), (asValue loss::Float))
 
       let trainingLoss = sum batchLosses / (fromIntegral (length batches)::Float)
-      print $ "Epoch #" ++ show epoch 
-      print $ "Training Loss: " ++ show trainingLoss
+      putStrLn $ "Epoch #" ++ show epoch 
+      putStrLn $ "Training Loss: " ++ show trainingLoss
 
-      when (epoch `mod` 5 == 0) $ do
-        let answers = fmap (\(RNNGSentence (_, actions)) -> actions) validationData
-            (validationAcc, _) = evaluate updated indexData validationData answers
-        print $ "Validation Accuracy: " ++ show validationAcc
-      return ((updated, opts), trainingLoss)
+      -- when (epoch `mod` 5 == 0) $ do
+      (validationAcc, validationLoss, validationPrediction) <- evaluate updated indexData validationData
+      putStrLn $ "Validation Accuracy: " ++ show validationAcc
+      putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
+      sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
+      putStrLn "======================================"
+      return ((updated, opts), validationLoss)
 
   -- | model保存
-  Torch.Train.saveParams trained (modelFilePath ++ "-rnng")
+  Torch.Train.saveParams trained modelFilePath
   drawLearningCurve graphFilePath "Learning Curve" [("", reverse losses)]
   print losses
   
   -- | model読み込み
-  rnngModel <- Torch.Train.loadParams rnngSpec (modelFilePath ++ "-rnng")
+  rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
 
-  let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
-      (acc, predicted) = evaluate rnngModel indexData evaluationData answers
-  -- print $ zip answers predicted
+  (acc, _, evaluationPrediction) <- evaluate rnngModel indexData evaluationData
+  sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= printResult  
   print $ "acc: " ++ show acc
   return ()
