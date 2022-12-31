@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: e2d9da0bff81dd34f094f13aece60d0c6df98fa801977d18cca967579ce2627a
+-- hash: 410e9e5e25e1be1d478c05ff028867250f547db9e3bf9df1dd392be5e1f513be
 
 name:           rnng-hasktorch
 version:        0.1.0.0
@@ -27,8 +27,11 @@ source-repository head
 
 library
   exposed-modules:
-      Embedding
-      PTB
+      Data.CCG
+      Data.CFG
+      Data.RNNGSentence
+      Data.SyntaxTree
+      Model.RNNG
       Util
   other-modules:
       Paths_rnng_hasktorch
