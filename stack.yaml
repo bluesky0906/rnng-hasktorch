@@ -12,7 +12,7 @@ extra-lib-dirs:
 
 extra-deps:
   - git: https://github.com/DaisukeBekki/nlp-tools.git
-    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
+    commit: 31f14c0f50ca835d0e261a01c4cd6bd16de23bf4
   - ../.local/lib/hasktorch/codegen
   - ../.local/lib/hasktorch/libtorch-ffi
   - ../.local/lib/hasktorch/libtorch-ffi-helper
