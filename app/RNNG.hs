@@ -142,7 +142,7 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
       action_embedding = embedding' (toDependent actionEmbedding) ((toDevice myDevice . asTensor . actionIndexFor) textAction)
   in RNNGState {
       stack = nt_embedding:stack,
-      textStack = ((T.pack "(") `T.append` label):textStack,
+      textStack = ((T.pack "<") `T.append` label):textStack,
       hiddenStack = (stackLSTMForward stackLSTM hiddenStack nt_embedding):hiddenStack,
       buffer = buffer,
       textBuffer = textBuffer,
@@ -169,7 +169,7 @@ parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE
   let textAction = REDUCE
       action_embedding = embedding' (toDependent actionEmbedding) ((toDevice myDevice . asTensor . actionIndexFor) textAction)
       -- | 開いたlabelのidxを特定する
-      (Just idx) = findIndex (\elem -> (T.isPrefixOf (T.pack "(") elem) && not (T.isSuffixOf (T.pack ")") elem)) textStack
+      (Just idx) = findIndex (\elem -> (T.isPrefixOf (T.pack "<") elem) && not (T.isSuffixOf (T.pack ">") elem)) textStack
       -- | popする
       (textSubTree, newTextStack) = splitAt (idx + 1) textStack
       (subTree, newStack) = splitAt (idx + 1) stack
@@ -178,7 +178,7 @@ parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE
       composedSubTree = snd $ last $ biLstmLayers compLSTM (toDependent $ compc0, toDependent $ comph0) (reverse subTree)
   in RNNGState {
       stack = composedSubTree:newStack,
-      textStack = (T.intercalate (T.pack " ") (reverse $ (T.pack ")"):textSubTree)):newTextStack,
+      textStack = (T.intercalate (T.pack " ") (reverse $ (T.pack ">"):textSubTree)):newTextStack,
       hiddenStack = (stackLSTMForward stackLSTM newHiddenStack composedSubTree):newHiddenStack,
       buffer = buffer,
       textBuffer = textBuffer,
@@ -388,7 +388,7 @@ main = do
   initRNNGModel <- toDevice myDevice <$> sample rnngSpec
   batches <- makeBatch' batchSize iter dataForTraining
 
-  | training
+  -- | training
   ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
     \epoch (rnng, (opt1, opt2, opt3)) -> do
       let rnngSentences = batches !! (epoch - 1)
