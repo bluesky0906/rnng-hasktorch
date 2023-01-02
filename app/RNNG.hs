@@ -358,9 +358,9 @@ main = do
       numLayer = fromIntegral (getNumLayer config)::Int
       learningRate = toDevice myDevice $ asTensor (getLearningRate config)
       modelName = getModelName config
-      modelFilePath = "models/" ++ modelFilePath
-      graphFilePath = "imgs/" ++ modelFilePath ++ ".png"
-      reportFilePath = "reports/" ++ modelFilePath ++ ".txt"
+      modelFilePath = "models/" ++ modelName
+      graphFilePath = "imgs/" ++ modelName ++ ".png"
+      reportFilePath = "reports/" ++ modelName ++ ".txt"
       batchSize = 100 -- | まとめて学習はできないので、batchではない
       optim = GD
   -- data
@@ -396,7 +396,7 @@ main = do
       ((updated, opts), batchLosses) <- mapAccumM rnngSentences (rnng, (opt1, opt2, opt3)) $ 
         \rnngSentence (rnng', (opt1', opt2', opt3')) -> do
           let RNNGSentence (sents, actions) = rnngSentence
-              answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
+          let answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
           dropoutOutput <- forM output (dropout 0.2 True) 
           let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
@@ -409,7 +409,7 @@ main = do
                                        else return (compRNNG, opt3')
           return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (opt1'', opt2'', opt3'')), (asValue loss::Float))
 
-      let trainingLoss = sum batchLosses / (fromIntegral (length batches)::Float)
+      let trainingLoss = sum batchLosses / (fromIntegral (length rnngSentences)::Float)
       putStrLn $ "Epoch #" ++ show epoch 
       putStrLn $ "Training Loss: " ++ show trainingLoss
 

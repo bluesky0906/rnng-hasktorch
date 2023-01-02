@@ -77,7 +77,7 @@ main = do
       trainingDataDirs = fmap (wsjDirPath ++) ["02/", "03/", "04/", "05/", "06/", "07/", "08/", "09/", "10/", "11/", "12/", "13/", "14/", "15/", "16/", "17/", "18/", "19/", "20/", "21/"]
       validationDataDirs = fmap (wsjDirPath ++) ["24/"]
       evaluationDataDirs = fmap (wsjDirPath ++) ["23/"]
-  -- saveActionData rnngGrammar trainingDataDirs $ (getTrainingDataPath config) ++ show rnngGrammar
-  -- saveActionData rnngGrammar evaluationDataDirs $ (getEvaluationDataPath config) ++ show rnngGrammar
-  saveActionData rnngGrammar validationDataDirs $ (getValidationDataPath config) ++ show rnngGrammar
+  saveActionData rnngGrammar trainingDataDirs $ "data/training" ++ show rnngGrammar
+  saveActionData rnngGrammar evaluationDataDirs $ "data/evaluation" ++ show rnngGrammar
+  saveActionData rnngGrammar validationDataDirs $ "data/validation" ++ show rnngGrammar
   return ()
