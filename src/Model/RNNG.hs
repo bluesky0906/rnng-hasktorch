@@ -155,4 +155,11 @@ data RNNGState where
       numOpenParen :: Int
     } ->
     RNNGState 
-  deriving (Show)
+
+instance Show RNNGState where
+  show RNNGState {..} = unlines [
+      "textStack: " ++ show textStack,
+      "textBuffer: " ++ show textBuffer,
+      "textActionHistory: " ++ show textActionHistory,
+      "numOpenParen: " ++ show numOpenParen
+    ]

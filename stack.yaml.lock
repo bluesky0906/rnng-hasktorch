@@ -5,15 +5,15 @@
 
 packages:
 - completed:
-    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
+    commit: 31f14c0f50ca835d0e261a01c4cd6bd16de23bf4
     git: https://github.com/DaisukeBekki/nlp-tools.git
     name: nlp-tools
     pantry-tree:
-      sha256: c04b1d8be835a5b33e762fca3abbe6348dc3ac2a79e701a886b6a23f432c4731
+      sha256: 6400ad911fb976a71a22ca274f1217365b9e3e21eaaf32a4d0f48a555da3d241
       size: 1727
     version: 0.1.9
   original:
-    commit: 0b6912850dbffd14ed16c3fa26a0773c877ba093
+    commit: 31f14c0f50ca835d0e261a01c4cd6bd16de23bf4
     git: https://github.com/DaisukeBekki/nlp-tools.git
 - completed:
     commit: 2d0fe9b2f0aa0e1aefc7bfed95a501e59486afb0

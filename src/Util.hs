@@ -64,8 +64,7 @@ data Config = Config {
   getHiddenSize :: Natural,
   getNumLayer :: Natural,
   getLearningRate :: Double,
-  getGraphFilePath :: String,
-  getModelFilePath :: String
+  getModelName :: String
   } deriving (Generic, Show)
 
 instance FromDhall Config
