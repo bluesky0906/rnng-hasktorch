@@ -27,9 +27,9 @@ parse text file to CCGTree
 -}
 
 parseCCGfile :: FilePath -> IO [Tree]
-parseCCGfile ptbFilePath = do
-  ptb <- T.readFile ptbFilePath
-  return $ parseCCGTrees ptb
+parseCCGfile filePath = do
+  ccg <- T.readFile filePath
+  return $ parseCCGTrees ccg
 
 parseCCGTrees :: T.Text -> [Tree]
 parseCCGTrees text =
@@ -107,7 +107,7 @@ nonLeafParser = do
   closeAngleBracket
   blank
   -- child <- manyTill anyChar closeParen
-  tree <- many (try leafParser <|> try nonLeafParser) 
+  tree <- many (try nonLeafParser <|> leafParser) 
   closeParen
   blank
   return $ Phrase (category, tree)

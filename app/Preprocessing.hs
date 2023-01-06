@@ -59,8 +59,8 @@ saveActionData grammar dirsPath outputPath = do
   let trees = concat treess
       parsedTrees = filter (not . isErr) $ trees
   mapM_ (putStrLn . show) $ filter isErr $ trees
-  let rnngSentence = traverseTrees parsedTrees
-  saveActionsToBinary outputPath rnngSentence
+  let rnngSentences = traverseTrees parsedTrees
+  saveActionsToBinary outputPath rnngSentences
   -- content <- loadActionsFromBinary outputPath
   return ()
   where
