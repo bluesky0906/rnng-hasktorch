@@ -43,7 +43,7 @@ ccgsParser = many1 ccgParser
 ccgParser :: Parser Tree
 ccgParser = do
   ignoreSentenceInfo
-  tree <- try nonLeafParser <|> leafParser
+  tree <- try nonLeafParser <|> headLeafParser
   optional newline
   return tree
 
@@ -72,6 +72,27 @@ openAngleBracket = T.singleton <$> char '<'
 
 closeAngleBracket :: Parser T.Text
 closeAngleBracket = T.singleton <$> char '>'
+
+-- | １単語のみのデータに対応
+headLeafParser :: Parser Tree
+headLeafParser = do
+  openParen
+  openAngleBracket
+  char 'L'
+  blank
+  category <- literal
+  blank
+  pos <- literal
+  blank
+  literal
+  blank
+  word <- literal
+  blank
+  literal
+  closeAngleBracket
+  closeParen
+  blank
+  return $ Phrase (category, [Phrase (pos, [Word word])])
 
 leafParser :: Parser Tree
 leafParser = do

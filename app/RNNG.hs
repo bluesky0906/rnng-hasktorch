@@ -341,11 +341,6 @@ printResult result = forM_ result \(RNNGSentence (words, actions), predition) ->
   putStrLn "----------------------------------"
   return ()
 
-filterInvalidData :: [RNNGSentence] -> [RNNGSentence]
-filterInvalidData = filter f
-  where
-    f (RNNGSentence (_, actions)) = (head actions /= SHIFT) && (head actions /= REDUCE)
-
 main :: IO()
 main = do
   -- experiment setting
@@ -367,9 +362,9 @@ main = do
       batchSize = 100 -- | まとめて学習はできないので、batchではない
       optim = GD
   -- data
-  trainingData <- fmap filterInvalidData $ loadActionsFromBinary $ getTrainingDataPath config
-  validationData <- fmap filterInvalidData $ loadActionsFromBinary $ getValidationDataPath config
-  evaluationData <- fmap filterInvalidData $ loadActionsFromBinary $ getEvaluationDataPath config
+  trainingData <- loadActionsFromBinary $ getTrainingDataPath config
+  validationData <- loadActionsFromBinary $ getValidationDataPath config
+  evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
   let dataForTraining = trainingData
   putStrLn $ "Training Data Size: " ++ show (length trainingData)
   putStrLn $ "Validation Data Size: " ++ show (length validationData)
