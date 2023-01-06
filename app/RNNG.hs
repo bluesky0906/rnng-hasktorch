@@ -4,7 +4,6 @@
 
 module RNNG where
 import Model.RNNG
-import Data.CFG
 import Data.RNNGSentence
 import Util
 import Torch hiding (foldLoop, take, repeat)
@@ -342,6 +341,10 @@ printResult result = forM_ result \(RNNGSentence (words, actions), predition) ->
   putStrLn "----------------------------------"
   return ()
 
+filterInvalidData :: [RNNGSentence] -> [RNNGSentence]
+filterInvalidData = filter f
+  where
+    f (RNNGSentence (_, actions)) = (head actions /= SHIFT) && (head actions /= REDUCE)
 
 main :: IO()
 main = do
@@ -364,9 +367,9 @@ main = do
       batchSize = 100 -- | まとめて学習はできないので、batchではない
       optim = GD
   -- data
-  trainingData <- loadActionsFromBinary $ getTrainingDataPath config
-  validationData <- loadActionsFromBinary $ getValidationDataPath config
-  evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
+  trainingData <- fmap filterInvalidData $ loadActionsFromBinary $ getTrainingDataPath config
+  validationData <- fmap filterInvalidData $ loadActionsFromBinary $ getValidationDataPath config
+  evaluationData <- fmap filterInvalidData $ loadActionsFromBinary $ getEvaluationDataPath config
   let dataForTraining = trainingData
   putStrLn $ "Training Data Size: " ++ show (length trainingData)
   putStrLn $ "Validation Data Size: " ++ show (length validationData)
@@ -396,7 +399,7 @@ main = do
       ((updated, opts), batchLosses) <- mapAccumM rnngSentences (rnng, (opt1, opt2, opt3)) $ 
         \rnngSentence (rnng', (opt1', opt2', opt3')) -> do
           let RNNGSentence (sents, actions) = rnngSentence
-          let answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
+              answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
           dropoutOutput <- forM output (dropout 0.2 True) 
           let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
