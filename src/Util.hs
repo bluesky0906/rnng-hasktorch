@@ -11,14 +11,19 @@ import Data.Ord
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
 import Dhall hiding ( map )
 
+{-
 
+汎用的な関数　(hasktorch-toolsに移動したい)
+
+-}
 maxLengthFor :: [[a]] -> Int
 maxLengthFor list = length $ L.maximumBy (comparing length) list
 
 padding :: Int -> [Int] -> [Int]
 padding maxLength list = list ++ take (maxLength - (length list)) (repeat 1)
 
-indexForBatch :: 
+-- |  batchごとに分けられたデータをpaddingしてindex化する
+indexForBatch ::
   (a -> Int) ->
   [[a]] ->
   [[Int]]
@@ -45,6 +50,12 @@ indexFactory dic unk padding =
     wordToIndexFactory map wrd = M.findWithDefault 0 wrd map
     indexToWordFactory map idx = M.findWithDefault unk idx map
 
+{-
+
+for Config file
+
+-}
+
 getProjectRoot :: IO (String)
 getProjectRoot = do
   projectRoot <- getProjectRootWeightedCurrent
@@ -54,17 +65,17 @@ getProjectRoot = do
 
 
 data Config = Config { 
-  getTrainingDataPath :: String,
-  getValidationDataPath :: String,
-  getEvaluationDataPath :: String,
-  getTrial :: Natural,
-  getEpoch :: Natural,
-  getActionEmbedSize :: Natural,
-  getWordEmbedSize :: Natural,
-  getHiddenSize :: Natural,
-  getNumLayer :: Natural,
-  getLearningRate :: Double,
-  getModelName :: String
+  modeConfig :: String, 
+  trainingDataPathConfig :: String,
+  validationDataPathConfig :: String,
+  evaluationDataPathConfig :: String,
+  epochConfig :: Natural,
+  actionEmbedSizeConfig :: Natural,
+  wordEmbedSizeConfig :: Natural,
+  hiddenSizeConfig :: Natural,
+  numOfLayerConfig :: Natural,
+  learningRateConfig :: Double,
+  modelNameConfig :: String
   } deriving (Generic, Show)
 
 instance FromDhall Config

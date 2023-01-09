@@ -349,22 +349,23 @@ main = do
   print config
   putStrLn "======================================"
 
-  let iter = fromIntegral (getEpoch config)::Int
-      wordEmbedSize = fromIntegral (getWordEmbedSize config)::Int
-      actionEmbedSize = fromIntegral (getActionEmbedSize config)::Int
-      hiddenSize = fromIntegral (getHiddenSize config)::Int
-      numLayer = fromIntegral (getNumLayer config)::Int
-      learningRate = toDevice myDevice $ asTensor (getLearningRate config)
-      modelName = getModelName config
+  let mode = modeConfig config
+      iter = fromIntegral (epochConfig config)::Int
+      wordEmbedSize = fromIntegral (wordEmbedSizeConfig config)::Int
+      actionEmbedSize = fromIntegral (actionEmbedSizeConfig config)::Int
+      hiddenSize = fromIntegral (hiddenSizeConfig config)::Int
+      numLayer = fromIntegral (numOfLayerConfig config)::Int
+      learningRate = toDevice myDevice $ asTensor (learningRateConfig config)
+      modelName = modelNameConfig config
       modelFilePath = "models/" ++ modelName
       graphFilePath = "imgs/" ++ modelName ++ ".png"
       reportFilePath = "reports/" ++ modelName ++ ".txt"
       batchSize = 100 -- | まとめて学習はできないので、batchではない
       optim = GD
   -- data
-  trainingData <- loadActionsFromBinary $ getTrainingDataPath config
-  validationData <- loadActionsFromBinary $ getValidationDataPath config
-  evaluationData <- loadActionsFromBinary $ getEvaluationDataPath config
+  trainingData <- loadActionsFromBinary $ trainingDataPathConfig config
+  validationData <- loadActionsFromBinary $ validationDataPathConfig config
+  evaluationData <- loadActionsFromBinary $ evaluationDataPathConfig config
   let dataForTraining = trainingData
   putStrLn $ "Training Data Size: " ++ show (length trainingData)
   putStrLn $ "Validation Data Size: " ++ show (length validationData)
