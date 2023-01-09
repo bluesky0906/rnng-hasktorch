@@ -3,6 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Model.RNNG where
 import Data.CFG
@@ -15,7 +16,13 @@ import Torch.Layer.LSTM (LstmHypParams(..), LstmParams)
 import Torch.Layer.Linear (LinearHypParams(..), LinearParams)
 import GHC.Generics
 import qualified Data.Text as T
+import qualified Data.Map as M
+import Data.Binary
 
+deriving instance Generic DeviceType
+deriving instance Binary DeviceType
+deriving instance Generic Device
+deriving instance Binary Device
 
 data RNNGSpec = RNNGSpec {
   modelDevice :: Device,
@@ -25,7 +32,7 @@ data RNNGSpec = RNNGSpec {
   actionNumEmbed :: Int,
   ntNumEmbed :: Int,
   hiddenSize :: Int
-} deriving (Show, Eq)
+} deriving (Show, Eq, Generic, Binary)
 
 
 {-
@@ -116,7 +123,9 @@ instance
 
 
 {-
+
   Data Structure for RNNG
+
 -}
 
 data IndexData = IndexData {

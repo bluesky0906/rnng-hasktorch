@@ -20,6 +20,7 @@ import ML.Exp.Classification (showClassificationReport)
 
 import qualified Data.Text.IO as T --text
 import qualified Data.Text as T    --text
+import qualified Data.Binary as B
 import Data.List
 import Data.Functor
 import Debug.Trace
@@ -358,6 +359,7 @@ main = do
       learningRate = toDevice myDevice $ asTensor (learningRateConfig config)
       modelName = modelNameConfig config
       modelFilePath = "models/" ++ modelName
+      modelSpecPath = "models/" ++ modelName ++ "-spec"
       graphFilePath = "imgs/" ++ modelName ++ ".png"
       reportFilePath = "reports/" ++ modelName ++ ".txt"
       batchSize = 100 -- | まとめて学習はできないので、batchではない
@@ -377,18 +379,17 @@ main = do
       (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 0 toActionList) ERROR Nothing
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 0 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
-      
   putStrLn $ "WordEmbDim: " ++ show wordEmbDim
   putStrLn $ "ActionEmbDim: " ++ show actionEmbDim
   putStrLn $ "NTEmbDim: " ++ show ntEmbDim
   putStrLn "======================================"
 
-  let rnngSpec = RNNGSpec myDevice wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
-  initRNNGModel <- toDevice myDevice <$> sample rnngSpec
-  batches <- makeBatch' batchSize iter dataForTraining
-
-  -- | training
   when (mode == "Train") $ do
+    let rnngSpec = RNNGSpec myDevice wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
+    initRNNGModel <- toDevice myDevice <$> sample rnngSpec
+    batches <- makeBatch' batchSize iter dataForTraining
+
+    -- | training
     ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
       \epoch (rnng, (opt1, opt2, opt3)) -> do
         let rnngSentences = batches !! (epoch - 1)
@@ -421,11 +422,15 @@ main = do
         return ((updated, opts), validationLoss)
 
     -- | model保存
+    B.encodeFile modelSpecPath rnngSpec
     Torch.Train.saveParams trained modelFilePath
     drawLearningCurve graphFilePath "Learning Curve" [("", reverse losses)]
     print losses
 
+  -- | evaluation
   -- | model読み込み
+  rnngSpec <- (B.decodeFile modelSpecPath)::(IO RNNGSpec)
+  print rnngSpec
   rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
 
   (_, evaluationPrediction) <- evaluate rnngModel indexData evaluationData

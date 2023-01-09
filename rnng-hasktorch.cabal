@@ -3,8 +3,6 @@ cabal-version: 1.12
 -- This file has been generated from package.yaml by hpack version 0.35.0.
 --
 -- see: https://github.com/sol/hpack
---
--- hash: 410e9e5e25e1be1d478c05ff028867250f547db9e3bf9df1dd392be5e1f513be
 
 name:           rnng-hasktorch
 version:        0.1.0.0
@@ -40,6 +38,7 @@ library
   build-depends:
       aeson
     , base >=4.7 && <5
+    , binary
     , bytestring
     , constraints
     , containers
@@ -69,6 +68,7 @@ executable Preprocessing
   build-depends:
       aeson
     , base >=4.7 && <5
+    , binary
     , bytestring
     , constraints
     , containers
@@ -99,6 +99,7 @@ executable RNNG
   build-depends:
       aeson
     , base >=4.7 && <5
+    , binary
     , bytestring
     , constraints
     , containers
@@ -132,6 +133,7 @@ test-suite rnng-hasktorch-test
   build-depends:
       aeson
     , base >=4.7 && <5
+    , binary
     , bytestring
     , constraints
     , containers
