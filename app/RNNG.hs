@@ -303,34 +303,6 @@ sampleRandomData size xs = do
   return $ map (xs !!) randomIdxes
 
 
-makeBatch' ::
-  Int ->
-  Int ->
-  [RNNGSentence] ->
-  IO [[RNNGSentence]]
-makeBatch' batchSize numOfBatches xs = do
-  -- 最後のbatchが足りなかったら埋める
-  newLastBatch <- if length lastBatch < batchSize
-                    then do
-                      sampled <- sampleRandomData (batchSize - length lastBatch) xs
-                      return $ lastBatch ++ sampled
-                    else return lastBatch
-  adjustSize $ (take (length batches - 1) batches) ++ [newLastBatch]
-  where 
-    batches = makeBatch batchSize xs
-    lastBatch = last batches
-    adjustSize :: [[RNNGSentence]] -> IO [[RNNGSentence]]
-    adjustSize list =
-      case length list of
-          -- | numOfBatches に届かなかったらランダムに取ってきて足す
-        _ | length list < numOfBatches -> do
-              sampledBatches <- sequence $ take (numOfBatches - (length list)) $ repeat (sampleRandomData batchSize xs) 
-              return $ list ++ sampledBatches
-          -- | 多かったら削る
-          | length list > numOfBatches -> return $ take numOfBatches list
-          | otherwise           -> return list
-
-
 printResult ::
   [(RNNGSentence, [Action])] ->
   IO ()
@@ -362,7 +334,7 @@ main = do
       modelSpecPath = "models/" ++ modelName ++ "-spec"
       graphFilePath = "imgs/" ++ modelName ++ ".png"
       reportFilePath = "reports/" ++ modelName ++ ".txt"
-      batchSize = 100 -- | まとめて学習はできないので、batchではない
+      validationStep = fromIntegral (validationStepConfig config)::Int
       optim = GD
   -- data
   trainingData <- loadActionsFromBinary $ trainingDataPathConfig config
@@ -387,45 +359,47 @@ main = do
   when (mode == "Train") $ do
     let rnngSpec = RNNGSpec myDevice wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
     initRNNGModel <- toDevice myDevice <$> sample rnngSpec
-    batches <- makeBatch' batchSize iter dataForTraining
 
     -- | training
     ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
       \epoch (rnng, (opt1, opt2, opt3)) -> do
-        let rnngSentences = batches !! (epoch - 1)
+        let batches = take 2 $ makeBatch validationStep dataForTraining
 
-        ((updated, opts), batchLosses) <- mapAccumM rnngSentences (rnng, (opt1, opt2, opt3)) $ 
-          \rnngSentence (rnng', (opt1', opt2', opt3')) -> do
-            let RNNGSentence (sents, actions) = rnngSentence
-                answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
-                output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
-            dropoutOutput <- forM output (dropout 0.2 True) 
-            let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
-                RNNG actionPredictRNNG parseRNNG compRNNG = rnng'
-            -- | パラメータ更新
-            (updatedActionPredictRNNG, opt1'') <- runStep actionPredictRNNG opt1' loss learningRate
-            (updatedParseRNNG, opt2'') <- runStep parseRNNG opt2' loss learningRate
-            (updatedCompRNNG, opt3'') <- if length (filter (== REDUCE) actions) > 1
-                                          then runStep compRNNG opt3' loss learningRate
-                                        else return (compRNNG, opt3')
-            return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (opt1'', opt2'', opt3'')), (asValue loss::Float))
+        ((updated, opts), batchLosses) <- mapAccumM [1..(length batches)] (rnng, (opt1, opt2, opt3)) $
+          -- | batch処理はできていないが、便宜上
+          \index (rnng', (opt1', opt2', opt3')) -> do
+            let batch = batches !! (index-1)
+            ((updated', opts'), batchLoss) <- mapAccumM batch (rnng', (opt1', opt2', opt3')) $ 
+              \rnngSentence (rnng'', (opt1'', opt2'', opt3'')) -> do
+                let RNNGSentence (sents, actions) = rnngSentence
+                    answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
+                    output = rnngForward Train rnng'' indexData (RNNGSentence (sents, actions))
+                dropoutOutput <- forM output (dropout 0.2 True) 
+                let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
+                    RNNG actionPredictRNNG parseRNNG compRNNG = rnng''
+                -- | パラメータ更新
+                (updatedActionPredictRNNG, opt1''') <- runStep actionPredictRNNG opt1'' loss learningRate
+                (updatedParseRNNG, opt2''') <- runStep parseRNNG opt2'' loss learningRate
+                (updatedCompRNNG, opt3''') <- if length (filter (== REDUCE) actions) > 1
+                                              then runStep compRNNG opt3'' loss learningRate
+                                            else return (compRNNG, opt3'')
+                return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (opt1''', opt2''', opt3''')), (asValue loss::Float))
 
-        let trainingLoss = sum batchLosses / (fromIntegral (length rnngSentences)::Float)
-        putStrLn $ "Epoch #" ++ show epoch 
-        putStrLn $ "Training Loss: " ++ show trainingLoss
+            let trainingLoss = sum batchLoss / (fromIntegral (length batch)::Float)
+            putStrLn $ "#" ++ show index 
+            putStrLn $ "Training Loss: " ++ show trainingLoss
 
-        -- when (epoch `mod` 5 == 0) $ do
-        (validationLoss, validationPrediction) <- evaluate updated indexData validationData
-        putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
-        sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
-        putStrLn "======================================"
-        return ((updated, opts), validationLoss)
+            (validationLoss, validationPrediction) <- evaluate updated' indexData validationData
+            putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
+            sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
+            putStrLn "======================================"
+            return ((updated', opts'), validationLoss)
+        return ((updated, opts), batchLosses)
 
     -- | model保存
     B.encodeFile modelSpecPath rnngSpec
     Torch.Train.saveParams trained modelFilePath
-    drawLearningCurve graphFilePath "Learning Curve" [("", reverse losses)]
-    print losses
+    drawLearningCurve graphFilePath "Learning Curve" [("", reverse $ concat losses)]
 
   -- | evaluation
   -- | model読み込み

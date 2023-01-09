@@ -70,6 +70,7 @@ data Config = Config {
   validationDataPathConfig :: String,
   evaluationDataPathConfig :: String,
   epochConfig :: Natural,
+  validationStepConfig :: Natural,
   actionEmbedSizeConfig :: Natural,
   wordEmbedSizeConfig :: Natural,
   hiddenSizeConfig :: Natural,
