@@ -27,9 +27,9 @@ parse text file to CCGTree
 -}
 
 parseCCGfile :: FilePath -> IO [Tree]
-parseCCGfile ptbFilePath = do
-  ptb <- T.readFile ptbFilePath
-  return $ parseCCGTrees ptb
+parseCCGfile filePath = do
+  ccg <- T.readFile filePath
+  return $ parseCCGTrees ccg
 
 parseCCGTrees :: T.Text -> [Tree]
 parseCCGTrees text =
@@ -43,7 +43,7 @@ ccgsParser = many1 ccgParser
 ccgParser :: Parser Tree
 ccgParser = do
   ignoreSentenceInfo
-  tree <- try nonLeafParser <|> leafParser
+  tree <- try nonLeafParser <|> headLeafParser
   optional newline
   return tree
 
@@ -72,6 +72,27 @@ openAngleBracket = T.singleton <$> char '<'
 
 closeAngleBracket :: Parser T.Text
 closeAngleBracket = T.singleton <$> char '>'
+
+-- | １単語のみのデータに対応
+headLeafParser :: Parser Tree
+headLeafParser = do
+  openParen
+  openAngleBracket
+  char 'L'
+  blank
+  category <- literal
+  blank
+  pos <- literal
+  blank
+  literal
+  blank
+  word <- literal
+  blank
+  literal
+  closeAngleBracket
+  closeParen
+  blank
+  return $ Phrase (category, [Phrase (pos, [Word word])])
 
 leafParser :: Parser Tree
 leafParser = do
@@ -107,7 +128,7 @@ nonLeafParser = do
   closeAngleBracket
   blank
   -- child <- manyTill anyChar closeParen
-  tree <- many (try leafParser <|> try nonLeafParser) 
+  tree <- many (try nonLeafParser <|> leafParser) 
   closeParen
   blank
   return $ Phrase (category, tree)

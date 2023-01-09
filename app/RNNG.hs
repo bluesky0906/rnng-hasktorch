@@ -4,7 +4,6 @@
 
 module RNNG where
 import Model.RNNG
-import Data.CFG
 import Data.RNNGSentence
 import Util
 import Torch hiding (foldLoop, take, repeat)
@@ -342,7 +341,6 @@ printResult result = forM_ result \(RNNGSentence (words, actions), predition) ->
   putStrLn "----------------------------------"
   return ()
 
-
 main :: IO()
 main = do
   -- experiment setting
@@ -396,7 +394,7 @@ main = do
       ((updated, opts), batchLosses) <- mapAccumM rnngSentences (rnng, (opt1, opt2, opt3)) $ 
         \rnngSentence (rnng', (opt1', opt2', opt3')) -> do
           let RNNGSentence (sents, actions) = rnngSentence
-          let answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
+              answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
               output = rnngForward Train rnng' indexData (RNNGSentence (sents, actions))
           dropoutOutput <- forM output (dropout 0.2 True) 
           let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
