@@ -27,10 +27,6 @@ import Debug.Trace
 import System.Random
 import Control.Monad
 
-myDevice :: Device
-myDevice = Device CUDA 0
-
-
 {-
 mask Forbidden actions
 -}
@@ -62,10 +58,11 @@ checkSHIFTForbidden RNNGState{..} =
   || length textBuffer == 0 -- Buffer isn't empty
 
 maskTensor :: 
+  Device ->
   RNNGState ->
   [Action] ->
   Tensor
-maskTensor rnngState actions = toDevice myDevice $ asTensor $ map mask actions
+maskTensor device rnngState actions = toDevice device $ asTensor $ map mask actions
   where 
     ntForbidden = checkNTForbidden rnngState
     reduceForbidden = checkREDUCEForbidden rnngState
@@ -77,13 +74,14 @@ maskTensor rnngState actions = toDevice myDevice $ asTensor $ map mask actions
     mask SHIFT = shiftForbidden
 
 maskImpossibleAction ::
+  Device ->
   Tensor ->
   RNNGState ->
   IndexData ->
   Tensor
-maskImpossibleAction prediction rnngState IndexData {..}  =
+maskImpossibleAction device prediction rnngState IndexData {..}  =
   let actions = map indexActionFor [0..((shape prediction !! 0) - 1)]
-      boolTensor = maskTensor rnngState actions
+      boolTensor = maskTensor device rnngState actions
   in maskedFill prediction boolTensor (1e-38::Float)
 
 
@@ -92,19 +90,20 @@ maskImpossibleAction prediction rnngState IndexData {..}  =
 -}
 
 predictNextAction ::
+  Device -> 
   RNNG ->
   -- | data
   RNNGState ->
   IndexData ->
   -- | possibility of actions
   Tensor
-predictNextAction (RNNG PredictActionRNNG {..} _ _) RNNGState {..} indexData = 
+predictNextAction device (RNNG PredictActionRNNG {..} _ _) RNNGState {..} indexData = 
   let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent $ bufferh0) buffer
       stackEmbedding = snd $ head hiddenStack
       actionEmbedding = hiddenActionHistory
       ut = Torch.tanh $ ((cat (Dim 0) [stackEmbedding, bufferEmbedding, actionEmbedding]) `matmul` (toDependent w) + (toDependent c))
       actionLogit = linearLayer linearParams ut
-      maskedAction = maskImpossibleAction actionLogit RNNGState {..} indexData
+      maskedAction = maskImpossibleAction device actionLogit RNNGState {..} indexData
   in logSoftmax (Dim 0) $ maskedAction
 
 
@@ -129,6 +128,7 @@ actionRNNForward ::
 actionRNNForward actionRNN hn newElem = snd $ rnnLayer actionRNN hn [newElem]
 
 parse ::
+  Device ->
   -- | model
   RNNG ->
   IndexData ->
@@ -136,10 +136,10 @@ parse ::
   RNNGState ->
   Action ->
   RNNGState
-parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
-  let nt_embedding = embedding' (toDependent ntEmbedding) ((toDevice myDevice . asTensor . ntIndexFor) label)
+parse device (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
+  let nt_embedding = embedding' (toDependent ntEmbedding) ((toDevice device . asTensor . ntIndexFor) label)
       textAction = NT label
-      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice myDevice . asTensor . actionIndexFor) textAction)
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
   in RNNGState {
       stack = nt_embedding:stack,
       textStack = ((T.pack "<") `T.append` label):textStack,
@@ -151,9 +151,9 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
       hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
       numOpenParen = numOpenParen + 1
     }
-parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
+parse device (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
   let textAction = SHIFT
-      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice myDevice . asTensor . actionIndexFor) textAction)
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
   in RNNGState {
       stack = (head buffer):stack,
       textStack = (head textBuffer):textStack,
@@ -165,9 +165,9 @@ parse (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
       hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
       numOpenParen = numOpenParen
     }
-parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
+parse device (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
   let textAction = REDUCE
-      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice myDevice . asTensor . actionIndexFor) textAction)
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
       -- | 開いたlabelのidxを特定する
       (Just idx) = findIndex (\elem -> (T.isPrefixOf (T.pack "<") elem) && not (T.isSuffixOf (T.pack ">") elem)) textStack
       -- | popする
@@ -189,6 +189,7 @@ parse (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE
     }
 
 predict ::
+  Device ->
   RuntimeMode ->
   RNNG ->
   IndexData ->
@@ -200,31 +201,32 @@ predict ::
   RNNGState ->
   -- | (predicted actions, new rnngState)
   ([Tensor], RNNGState)
-predict Train _ _ [] results rnngState = (reverse results, rnngState)
-predict Train rnng indexData (action:rest) predictionHitory rnngState =
-  let prediction = predictNextAction rnng rnngState indexData
-      newRNNGState = parse rnng indexData rnngState action
-  in predict Train rnng indexData rest (prediction:predictionHitory) newRNNGState
+predict device Train _ _ [] results rnngState = (reverse results, rnngState)
+predict device Train rnng indexData (action:rest) predictionHitory rnngState =
+  let prediction = predictNextAction device rnng rnngState indexData
+      newRNNGState = parse device rnng indexData rnngState action
+  in predict device Train rnng indexData rest (prediction:predictionHitory) newRNNGState
 
-predict Eval rnng IndexData {..} _ predictionHitory RNNGState {..} =
+predict device Eval rnng IndexData {..} _ predictionHitory RNNGState {..} =
   if ((length textStack) == 1) && ((length textBuffer) == 0)
     then (reverse predictionHitory, RNNGState {..} )
   else
-    let prediction = predictNextAction rnng RNNGState {..} IndexData {..}
+    let prediction = predictNextAction device rnng RNNGState {..} IndexData {..}
         action = indexActionFor (asValue (argmax (Dim 0) RemoveDim prediction)::Int)
-        newRNNGState = parse rnng IndexData {..} RNNGState {..} action
-    in predict Eval rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
+        newRNNGState = parse device rnng IndexData {..} RNNGState {..} action
+    in predict device Eval rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
 
 
 rnngForward ::
+  Device ->
   RuntimeMode ->
   RNNG ->
   -- | functions to convert text to index
   IndexData ->
   RNNGSentence ->
   [Tensor]
-rnngForward runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
-  let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . toDevice myDevice . asTensor . wordIndexFor) sents
+rnngForward device runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
+  let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . toDevice device . asTensor . wordIndexFor) sents
       initRNNGState = RNNGState {
         stack = [toDependent stackGuard],
         textStack = [],
@@ -236,7 +238,7 @@ rnngForward runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexDa
         hiddenActionHistory = actionRNNForward actionRNN (toDependent $ actionh0) (toDependent actionStart),
         numOpenParen = 0
       }
-  in fst $ predict runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
+  in fst $ predict device runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
 
 
 
@@ -260,12 +262,13 @@ classificationReport predictions answers =
   in showClassificationReport 10 $ zip (join alignedPredictions) (join alignedAnswers)
 
 evaluate ::
+  Device ->
   RNNG ->
   IndexData ->
   [RNNGSentence] ->
   -- | (loss, predicted action sequence)
   IO (Float, [[Action]])
-evaluate rnng IndexData {..} batches = do
+evaluate device rnng IndexData {..} batches = do
   (_, result) <- mapAccumM batches rnng step
   let (losses, predictions) = unzip result
       size = fromIntegral (length batches)::Float
@@ -274,8 +277,8 @@ evaluate rnng IndexData {..} batches = do
     step :: RNNGSentence -> RNNG -> IO (RNNG, (Float, [Action]))
     step batch rnng' = do
       let RNNGSentence (_, actions) = batch
-          answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
-          output = rnngForward Train rnng IndexData {..} batch
+          answer = toDevice device $ asTensor $ fmap actionIndexFor actions
+          output = rnngForward device Train rnng IndexData {..} batch
           predictionTensor = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
           prediction = fmap indexActionFor (asValue predictionTensor::[Int])
           -- | lossの計算は答えと推論結果の系列長が同じ時だけ
@@ -328,7 +331,8 @@ main = do
       actionEmbedSize = fromIntegral (actionEmbedSizeConfig config)::Int
       hiddenSize = fromIntegral (hiddenSizeConfig config)::Int
       numLayer = fromIntegral (numOfLayerConfig config)::Int
-      learningRate = toDevice myDevice $ asTensor (learningRateConfig config)
+      device = Device CUDA 0
+      learningRate = toDevice device $ asTensor (learningRateConfig config)
       modelName = modelNameConfig config
       modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
@@ -357,8 +361,8 @@ main = do
   putStrLn "======================================"
 
   when (mode == "Train") $ do
-    let rnngSpec = RNNGSpec myDevice wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
-    initRNNGModel <- toDevice myDevice <$> sample rnngSpec
+    let rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
+    initRNNGModel <- toDevice device <$> sample rnngSpec
 
     -- | training
     ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
@@ -372,8 +376,8 @@ main = do
             ((updated', opts'), batchLoss) <- mapAccumM batch (rnng', (opt1', opt2', opt3')) $ 
               \rnngSentence (rnng'', (opt1'', opt2'', opt3'')) -> do
                 let RNNGSentence (sents, actions) = rnngSentence
-                    answer = toDevice myDevice $ asTensor $ fmap actionIndexFor actions
-                    output = rnngForward Train rnng'' indexData (RNNGSentence (sents, actions))
+                    answer = toDevice device $ asTensor $ fmap actionIndexFor actions
+                    output = rnngForward device Train rnng'' indexData (RNNGSentence (sents, actions))
                 dropoutOutput <- forM output (dropout 0.2 True) 
                 let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
                     RNNG actionPredictRNNG parseRNNG compRNNG = rnng''
@@ -389,7 +393,7 @@ main = do
             putStrLn $ "#" ++ show index 
             putStrLn $ "Training Loss: " ++ show trainingLoss
 
-            (validationLoss, validationPrediction) <- evaluate updated' indexData validationData
+            (validationLoss, validationPrediction) <- evaluate device updated' indexData validationData
             putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
             sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
             putStrLn "======================================"
@@ -407,7 +411,7 @@ main = do
   print rnngSpec
   rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
 
-  (_, evaluationPrediction) <- evaluate rnngModel indexData evaluationData
+  (_, evaluationPrediction) <- evaluate device rnngModel indexData evaluationData
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
   T.writeFile reportFilePath $ classificationReport evaluationPrediction answers
   sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= printResult
