@@ -261,6 +261,53 @@ classificationReport predictions answers =
   let (alignedPredictions, alignedAnswers) = unzip $ map (\(prediction, answer) -> aligned prediction answer) (zip predictions answers)
   in showClassificationReport 10 $ zip (join alignedPredictions) (join alignedAnswers)
 
+training ::
+  (Optimizer o) =>
+  Device ->
+  -- | epoch数、validationStep, learningRate
+  (Int, Int, Tensor) ->
+  (RNNG, o) ->
+  IndexData ->
+  -- | trainingData, validationData
+  ([RNNGSentence], [RNNGSentence]) ->
+  IO (RNNG, [[Float]])
+training device (iter, validationStep, learningRate) (rnng, optim) IndexData {..} (trainingData, validationData) = do
+    ((trained, _), losses) <- mapAccumM [1..iter] (rnng, (optim, optim, optim)) epochStep
+    return (trained, losses)
+    where
+      batches = makeBatch validationStep trainingData
+      epochStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), [Float])
+      epochStep epoch model = mapAccumM [1..(length batches)] model batchStep
+      -- | TODO:: Batch処理にする
+      batchStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
+      batchStep idx (batchRNNG, batchOpts) = do
+        let batch = batches !! (idx - 1)
+        ((batchRNNG', batchOpts'), batchLoss) <- mapAccumM batch (batchRNNG, batchOpts) step
+        
+        let trainingLoss = sum batchLoss / (fromIntegral (length batch)::Float)
+        putStrLn $ "#" ++ show idx 
+        putStrLn $ "Training Loss: " ++ show trainingLoss
+
+        (validationLoss, validationPrediction) <- evaluate device batchRNNG' IndexData {..}  validationData
+        putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
+        sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
+        putStrLn "======================================"
+        return ((batchRNNG', batchOpts'), validationLoss)
+      step :: (Optimizer o) => RNNGSentence -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
+      step rnngSentence@(RNNGSentence (_, actions)) (stepRNNG@(RNNG actionPredictRNNG parseRNNG compRNNG), (stepOpt1, stepOpt2, stepOpt3)) = do
+        let answer = toDevice device $ asTensor $ fmap actionIndexFor actions
+            output = rnngForward device Train stepRNNG IndexData {..}  rnngSentence
+        dropoutOutput <- forM output (dropout 0.2 True) 
+        let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
+        -- | パラメータ更新
+        (updatedActionPredictRNNG, stepOpt1') <- runStep actionPredictRNNG stepOpt1 loss learningRate
+        (updatedParseRNNG, stepOpt2') <- runStep parseRNNG stepOpt2 loss learningRate
+        (updatedCompRNNG, stepOpt3') <- if length (filter (== REDUCE) actions) > 1
+                                        then runStep compRNNG stepOpt3 loss learningRate
+                                      else return (compRNNG, stepOpt3)
+        return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (stepOpt1', stepOpt2', stepOpt3')), (asValue loss::Float))
+
+
 evaluate ::
   Device ->
   RNNG ->
@@ -268,17 +315,16 @@ evaluate ::
   [RNNGSentence] ->
   -- | (loss, predicted action sequence)
   IO (Float, [[Action]])
-evaluate device rnng IndexData {..} batches = do
-  (_, result) <- mapAccumM batches rnng step
+evaluate device rnng IndexData {..} rnngSentences = do
+  (_, result) <- mapAccumM rnngSentences rnng step
   let (losses, predictions) = unzip result
-      size = fromIntegral (length batches)::Float
+      size = fromIntegral (length rnngSentences)::Float
   return ((sum losses) / size, reverse predictions)
   where
     step :: RNNGSentence -> RNNG -> IO (RNNG, (Float, [Action]))
-    step batch rnng' = do
-      let RNNGSentence (_, actions) = batch
-          answer = toDevice device $ asTensor $ fmap actionIndexFor actions
-          output = rnngForward device Train rnng IndexData {..} batch
+    step rnngSentence@(RNNGSentence (_, actions)) rnng' = do
+      let answer = toDevice device $ asTensor $ fmap actionIndexFor actions
+          output = rnngForward device Train rnng IndexData {..} rnngSentence
           predictionTensor = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
           prediction = fmap indexActionFor (asValue predictionTensor::[Int])
           -- | lossの計算は答えと推論結果の系列長が同じ時だけ
@@ -365,40 +411,7 @@ main = do
     initRNNGModel <- toDevice device <$> sample rnngSpec
 
     -- | training
-    ((trained, _), losses) <- mapAccumM [1..iter] (initRNNGModel, (optim, optim, optim)) $ 
-      \epoch (rnng, (opt1, opt2, opt3)) -> do
-        let batches = take 2 $ makeBatch validationStep dataForTraining
-
-        ((updated, opts), batchLosses) <- mapAccumM [1..(length batches)] (rnng, (opt1, opt2, opt3)) $
-          -- | batch処理はできていないが、便宜上
-          \index (rnng', (opt1', opt2', opt3')) -> do
-            let batch = batches !! (index-1)
-            ((updated', opts'), batchLoss) <- mapAccumM batch (rnng', (opt1', opt2', opt3')) $ 
-              \rnngSentence (rnng'', (opt1'', opt2'', opt3'')) -> do
-                let RNNGSentence (sents, actions) = rnngSentence
-                    answer = toDevice device $ asTensor $ fmap actionIndexFor actions
-                    output = rnngForward device Train rnng'' indexData (RNNGSentence (sents, actions))
-                dropoutOutput <- forM output (dropout 0.2 True) 
-                let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
-                    RNNG actionPredictRNNG parseRNNG compRNNG = rnng''
-                -- | パラメータ更新
-                (updatedActionPredictRNNG, opt1''') <- runStep actionPredictRNNG opt1'' loss learningRate
-                (updatedParseRNNG, opt2''') <- runStep parseRNNG opt2'' loss learningRate
-                (updatedCompRNNG, opt3''') <- if length (filter (== REDUCE) actions) > 1
-                                              then runStep compRNNG opt3'' loss learningRate
-                                            else return (compRNNG, opt3'')
-                return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (opt1''', opt2''', opt3''')), (asValue loss::Float))
-
-            let trainingLoss = sum batchLoss / (fromIntegral (length batch)::Float)
-            putStrLn $ "#" ++ show index 
-            putStrLn $ "Training Loss: " ++ show trainingLoss
-
-            (validationLoss, validationPrediction) <- evaluate device updated' indexData validationData
-            putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
-            sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
-            putStrLn "======================================"
-            return ((updated', opts'), validationLoss)
-        return ((updated, opts), batchLosses)
+    (trained, losses) <- training device (iter, validationStep, learningRate) (initRNNGModel, optim) indexData (trainingData, validationData)
 
     -- | model保存
     B.encodeFile modelSpecPath rnngSpec
