@@ -158,22 +158,11 @@ main = do
   putStrLn "======================================"
 
   let mode = modeConfig config
-      wordEmbedSize = fromIntegral (wordEmbedSizeConfig config)::Int
-      actionEmbedSize = fromIntegral (actionEmbedSizeConfig config)::Int
-      hiddenSize = fromIntegral (hiddenSizeConfig config)::Int
-      numLayer = fromIntegral (numOfLayerConfig config)::Int
       modelName = modelNameConfig config
       modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
-      graphFilePath = "imgs/" ++ modelName ++ ".png"
       reportFilePath = "reports/" ++ modelName ++ ".txt"
-      device = Device CUDA 0
-      trainingConfig = TrainingConfig {
-        iter = fromIntegral (epochConfig config)::Int,
-        learningRate = toDevice device $ asTensor (learningRateConfig config),
-        validationStep = fromIntegral (validationStepConfig config)::Int
-      }
-      optim = GD
+
   -- data
   trainingData <- loadActionsFromBinary $ trainingDataPathConfig config
   validationData <- loadActionsFromBinary $ validationDataPathConfig config
@@ -195,23 +184,35 @@ main = do
   putStrLn "======================================"
 
   when (mode == "Train") $ do
-    let rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
+    -- model spec
+    let wordEmbedSize = fromIntegral (wordEmbedSizeConfig config)::Int
+        actionEmbedSize = fromIntegral (actionEmbedSizeConfig config)::Int
+        hiddenSize = fromIntegral (hiddenSizeConfig config)::Int
+        numLayer = fromIntegral (numOfLayerConfig config)::Int
+        device = Device CUDA 0
+        rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
     initRNNGModel <- toDevice device <$> sample rnngSpec
 
     -- | training
+    let trainingConfig = TrainingConfig {
+                           iter = fromIntegral (epochConfig config)::Int,
+                           learningRate = toDevice device $ asTensor (learningRateConfig config),
+                           validationStep = fromIntegral (validationStepConfig config)::Int
+                         }
+        optim = GD
     (trained, losses) <- training device trainingConfig (initRNNGModel, optim) indexData (trainingData, validationData)
 
     -- | model保存
     B.encodeFile modelSpecPath rnngSpec
     Torch.Train.saveParams trained modelFilePath
-    drawLearningCurve graphFilePath "Learning Curve" [("", reverse $ concat losses)]
+    drawLearningCurve ("imgs/" ++ modelName ++ ".png") "Learning Curve" [("", reverse $ concat losses)]
 
   -- | evaluation
   rnngSpec <- (B.decodeFile modelSpecPath)::(IO RNNGSpec)
   print rnngSpec
   rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
 
-  (_, evaluationPrediction) <- evaluate device rnngModel indexData evaluationData
+  (_, evaluationPrediction) <- evaluate (modelDevice rnngSpec) rnngModel indexData evaluationData
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
   T.writeFile reportFilePath $ classificationReport evaluationPrediction answers
   sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= printResult

@@ -3,12 +3,12 @@
   trainingDataPathConfig = "data/trainingCFG",
   validationDataPathConfig = "data/validationCFG",
   evaluationDataPathConfig = "data/evaluationCFG",
-  epochConfig = 1,
-  validationStepConfig = 100,
-  actionEmbedSizeConfig = 128,
-  wordEmbedSizeConfig = 128,
-  hiddenSizeConfig = 128,
-  numOfLayerConfig = 2,
-  learningRateConfig = 10e-3,
+  epochConfig = 1, --only for training 
+  validationStepConfig = 400, --only for training 
+  actionEmbedSizeConfig = 128, --only for training 
+  wordEmbedSizeConfig = 128, --only for training 
+  hiddenSizeConfig = 128, --only for training 
+  numOfLayerConfig = 2, --only for training 
+  learningRateConfig = 1e-2, --only for training 
   modelNameConfig = "rnng-hasktorch-cfg"
 }
