@@ -10,13 +10,14 @@ import Data.CFG
 import Data.RNNGSentence
 import Torch hiding (take)
 -- | hasktorch-tools
-import Torch.Layer.RNN (RNNHypParams(..), RNNParams)
-import Torch.Layer.BiLSTM (BiLstmHypParams(..), BiLstmParams)
-import Torch.Layer.LSTM (LstmHypParams(..), LstmParams)
-import Torch.Layer.Linear (LinearHypParams(..), LinearParams)
+import Torch.Layer.RNN (RNNHypParams(..), RNNParams, rnnLayer)
+import Torch.Layer.BiLSTM (BiLstmHypParams(..), BiLstmParams, biLstmLayers)
+import Torch.Layer.LSTM (LstmHypParams(..), LstmParams, lstmLayer)
+import Torch.Layer.Linear (LinearHypParams(..), LinearParams, linearLayer)
 import GHC.Generics
 import qualified Data.Text as T
 import qualified Data.Map as M
+import Data.List
 import Data.Binary
 
 deriving instance Generic DeviceType
@@ -36,7 +37,9 @@ data RNNGSpec = RNNGSpec {
 
 
 {-
-  RNNG model
+
+RNNG model
+
 -}
 
 data PredictActionRNNG where
@@ -172,3 +175,219 @@ instance Show RNNGState where
       "textActionHistory: " ++ show textActionHistory,
       "numOpenParen: " ++ show numOpenParen
     ]
+
+{-
+
+mask Forbidden actions
+
+-}
+
+checkNTForbidden ::
+  RNNGState ->
+  Bool
+checkNTForbidden RNNGState {..} =
+  numOpenParen > 100 -- 開いているNTが多すぎる時
+  || length textBuffer == 0 -- 単語が残っていない時
+  
+checkREDUCEForbidden ::
+  RNNGState ->
+  Bool
+checkREDUCEForbidden RNNGState {..} =
+  length textStack < 2  -- first action must be NT and don't predict POS
+  || (numOpenParen == 1 && length textBuffer > 0) -- bufferに単語が残ってるのに木を一つにまとめることはできない
+  || ((previousAction /= SHIFT) && (previousAction /= REDUCE)) -- can't REDUCE after NT
+  where 
+    previousAction = if length textActionHistory > 0
+                      then head textActionHistory
+                      else ERROR
+
+checkSHIFTForbidden ::
+  RNNGState ->
+  Bool
+checkSHIFTForbidden RNNGState{..} =
+  length textStack == 0 -- first action must be NT
+  || length textBuffer == 0 -- Buffer isn't empty
+
+maskTensor :: 
+  Device ->
+  RNNGState ->
+  [Action] ->
+  Tensor
+maskTensor device rnngState actions = toDevice device $ asTensor $ map mask actions
+  where 
+    ntForbidden = checkNTForbidden rnngState
+    reduceForbidden = checkREDUCEForbidden rnngState
+    shiftForbidden = checkSHIFTForbidden rnngState
+    mask :: Action -> Bool
+    mask ERROR = True
+    mask (NT _) = ntForbidden
+    mask REDUCE = reduceForbidden
+    mask SHIFT = shiftForbidden
+
+maskImpossibleAction ::
+  Device ->
+  Tensor ->
+  RNNGState ->
+  IndexData ->
+  Tensor
+maskImpossibleAction device prediction rnngState IndexData {..}  =
+  let actions = map indexActionFor [0..((shape prediction !! 0) - 1)]
+      boolTensor = maskTensor device rnngState actions
+  in maskedFill prediction boolTensor (1e-38::Float)
+
+
+{-
+
+RNNG Forward
+
+-}
+
+predictNextAction ::
+  Device -> 
+  RNNG ->
+  -- | data
+  RNNGState ->
+  IndexData ->
+  -- | possibility of actions
+  Tensor
+predictNextAction device (RNNG PredictActionRNNG {..} _ _) RNNGState {..} indexData = 
+  let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent $ bufferh0) buffer
+      stackEmbedding = snd $ head hiddenStack
+      actionEmbedding = hiddenActionHistory
+      ut = Torch.tanh $ ((cat (Dim 0) [stackEmbedding, bufferEmbedding, actionEmbedding]) `matmul` (toDependent w) + (toDependent c))
+      actionLogit = linearLayer linearParams ut
+      maskedAction = maskImpossibleAction device actionLogit RNNGState {..} indexData
+  in logSoftmax (Dim 0) $ maskedAction
+
+stackLSTMForward :: 
+  LstmParams ->
+  -- | [(ci, hi)]
+  [(Tensor, Tensor)] ->
+  -- | new Element
+  Tensor ->
+  -- | (cn, hn)
+  (Tensor, Tensor)
+stackLSTMForward stackLSTM stack newElem = last $ lstmLayer stackLSTM (head stack) [newElem]
+
+actionRNNForward ::
+  RNNParams ->
+  -- | h_n
+  Tensor ->
+  -- | new Element
+  Tensor ->
+  -- | h_n+1
+  Tensor
+actionRNNForward actionRNN hn newElem = snd $ rnnLayer actionRNN hn [newElem]
+
+parse ::
+  Device ->
+  -- | model
+  RNNG ->
+  IndexData ->
+  -- | new RNNGState
+  RNNGState ->
+  Action ->
+  RNNGState
+parse device (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
+  let nt_embedding = embedding' (toDependent ntEmbedding) ((toDevice device . asTensor . ntIndexFor) label)
+      textAction = NT label
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
+  in RNNGState {
+      stack = nt_embedding:stack,
+      textStack = ((T.pack "<") `T.append` label):textStack,
+      hiddenStack = (stackLSTMForward stackLSTM hiddenStack nt_embedding):hiddenStack,
+      buffer = buffer,
+      textBuffer = textBuffer,
+      actionHistory = action_embedding:actionHistory,
+      textActionHistory = textAction:textActionHistory,
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
+      numOpenParen = numOpenParen + 1
+    }
+parse device (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
+  let textAction = SHIFT
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
+  in RNNGState {
+      stack = (head buffer):stack,
+      textStack = (head textBuffer):textStack,
+      hiddenStack = (stackLSTMForward stackLSTM hiddenStack (head buffer)):hiddenStack,
+      buffer = tail buffer,
+      textBuffer = tail textBuffer,
+      actionHistory = action_embedding:actionHistory,
+      textActionHistory = textAction:textActionHistory,
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
+      numOpenParen = numOpenParen
+    }
+parse device (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
+  let textAction = REDUCE
+      action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
+      -- | 開いたlabelのidxを特定する
+      (Just idx) = findIndex (\elem -> (T.isPrefixOf (T.pack "<") elem) && not (T.isSuffixOf (T.pack ">") elem)) textStack
+      -- | popする
+      (textSubTree, newTextStack) = splitAt (idx + 1) textStack
+      (subTree, newStack) = splitAt (idx + 1) stack
+      (_, newHiddenStack) = splitAt (idx + 1) hiddenStack
+      -- composeする
+      composedSubTree = snd $ last $ biLstmLayers compLSTM (toDependent $ compc0, toDependent $ comph0) (reverse subTree)
+  in RNNGState {
+      stack = composedSubTree:newStack,
+      textStack = (T.intercalate (T.pack " ") (reverse $ (T.pack ">"):textSubTree)):newTextStack,
+      hiddenStack = (stackLSTMForward stackLSTM newHiddenStack composedSubTree):newHiddenStack,
+      buffer = buffer,
+      textBuffer = textBuffer,
+      actionHistory = action_embedding:actionHistory,
+      textActionHistory = textAction:textActionHistory,
+      hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
+      numOpenParen = numOpenParen - 1
+    }
+
+predict ::
+  Device ->
+  RuntimeMode ->
+  RNNG ->
+  IndexData ->
+  -- | actions
+  [Action] ->
+  -- | predicted history
+  [Tensor] ->
+  -- | init RNNGState
+  RNNGState ->
+  -- | (predicted actions, new rnngState)
+  ([Tensor], RNNGState)
+predict device Train _ _ [] results rnngState = (reverse results, rnngState)
+predict device Train rnng indexData (action:rest) predictionHitory rnngState =
+  let prediction = predictNextAction device rnng rnngState indexData
+      newRNNGState = parse device rnng indexData rnngState action
+  in predict device Train rnng indexData rest (prediction:predictionHitory) newRNNGState
+
+predict device Eval rnng IndexData {..} _ predictionHitory RNNGState {..} =
+  if ((length textStack) == 1) && ((length textBuffer) == 0)
+    then (reverse predictionHitory, RNNGState {..} )
+  else
+    let prediction = predictNextAction device rnng RNNGState {..} IndexData {..}
+        action = indexActionFor (asValue (argmax (Dim 0) RemoveDim prediction)::Int)
+        newRNNGState = parse device rnng IndexData {..} RNNGState {..} action
+    in predict device Eval rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
+
+
+rnngForward ::
+  Device ->
+  RuntimeMode ->
+  RNNG ->
+  -- | functions to convert text to index
+  IndexData ->
+  RNNGSentence ->
+  [Tensor]
+rnngForward device runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
+  let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . toDevice device . asTensor . wordIndexFor) sents
+      initRNNGState = RNNGState {
+        stack = [toDependent stackGuard],
+        textStack = [],
+        hiddenStack = [stackLSTMForward stackLSTM [(toDependent stackh0, toDependent stackc0)] (toDependent stackGuard)],
+        buffer = sentsTensor ++ [toDependent bufferGuard],
+        textBuffer = sents,
+        actionHistory = [toDependent actionStart],
+        textActionHistory = [],
+        hiddenActionHistory = actionRNNForward actionRNN (toDependent $ actionh0) (toDependent actionStart),
+        numOpenParen = 0
+      }
+  in fst $ predict device runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
