@@ -7,9 +7,9 @@ import qualified Data.Map.Strict as M
 import Data.List.Split (chunksOf, splitEvery) --split
 import Data.List as L
 import Data.Ord
-
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
 import Dhall hiding ( map )
+import Graphics.Gnuplot.Simple
 
 {-
 
@@ -49,6 +49,26 @@ indexFactory dic unk padding =
     dic_size = length dic
     wordToIndexFactory map wrd = M.findWithDefault 0 wrd map
     indexToWordFactory map idx = M.findWithDefault unk idx map
+
+counts :: Ord a => [a] -> [(a, Int)]
+counts = map count . group . sort
+  where count xs = (head xs, length xs)
+
+-- TODO: X軸の表示
+-- unused
+drawHistgram ::
+  (Ord a, Show a) =>
+  FilePath ->
+  String ->
+  [a] ->
+  IO()
+drawHistgram filepath title lst = do
+  let strlst = fmap show lst
+      freqlstWithIdx = zip [0..] $ reverse $ sortOn snd $ counts strlst
+      dataForPlot = fmap (\(idx, freq) -> (idx, snd freq)) freqlstWithIdx
+      xTicks = unwords $ fmap (\(idx, (str, _)) -> "'"++ str ++ "'" ++ " " ++ show idx) freqlstWithIdx
+  print $ length $ takeWhile (\x -> snd x > 1) dataForPlot
+  plotPathStyle [(PNG filepath), (Title title), (XRange (0, fromIntegral (length dataForPlot)::Double))] (defaultStyle {plotType = Boxes}) dataForPlot
 
 {-
 

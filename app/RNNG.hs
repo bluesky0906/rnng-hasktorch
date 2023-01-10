@@ -118,6 +118,32 @@ evaluate device rnng IndexData {..} rnngSentences = do
                   else asTensor (0::Float)          
       return (rnng', ((asValue loss::Float), prediction))
 
+checkCorrect ::
+  [(Action, Action)] ->
+  Bool
+checkCorrect [] = True
+checkCorrect ((answer, prediction):rest)
+  | answer == prediction = checkCorrect rest
+  | otherwise            = False
+
+correctPredIdx ::
+  Int ->
+  [([Action], [Action])] ->
+  [Int]
+correctPredIdx _ [] = []
+correctPredIdx idx ((answer, prediction):rest) =
+  if checkCorrect (zip answer prediction) 
+    then idx:(correctPredIdx (idx + 1) rest)
+    else correctPredIdx (idx + 1) rest
+
+unknownActions ::
+  (Action -> Int) ->
+  [Action] ->
+  [Action]
+unknownActions actionIndexFor [] = []
+unknownActions actionIndexFor (action:rest)
+  | actionIndexFor action == 0 = action:(unknownActions actionIndexFor rest)
+  | otherwise                  = unknownActions actionIndexFor rest
 {-
 
   Util function for RNNG
@@ -192,7 +218,7 @@ main = do
         device = Device CUDA 0
         rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
     initRNNGModel <- toDevice device <$> sample rnngSpec
-
+    B.encodeFile modelSpecPath rnngSpec
     -- | training
     let trainingConfig = TrainingConfig {
                            iter = fromIntegral (epochConfig config)::Int,
@@ -209,11 +235,23 @@ main = do
 
   -- | evaluation
   rnngSpec <- (B.decodeFile modelSpecPath)::(IO RNNGSpec)
-  print rnngSpec
   rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
+  let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
+
+  -- | training dataにないactionとその頻度
+  putStrLn $ "Unknown Actions and their frequency: "
+  print $ counts $ unknownActions actionIndexFor $ toActionList evaluationData
+  
+  -- | trainingデータの低頻度ラベル
+  putStrLn $ "Num of ow frequency (<= 10) label: "
+  print $ length $ takeWhile (\x -> snd x <= 10) $ sortOn snd $ counts $ toNTList trainingData
 
   (_, evaluationPrediction) <- evaluate (modelDevice rnngSpec) rnngModel indexData evaluationData
-  let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
-  T.writeFile reportFilePath $ classificationReport evaluationPrediction answers
-  sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= printResult
+
+  -- | 全て正解の文を抜き出してくる
+  let correctIdxes = correctPredIdx 0 (zip answers evaluationPrediction)
+  print $ map (\idx -> evaluationData !! idx) $ correctIdxes 
+  print $ correctIdxes
+  -- T.writeFile reportFilePath $ classificationReport evaluationPrediction answers
+  -- sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= printResult
   return ()
