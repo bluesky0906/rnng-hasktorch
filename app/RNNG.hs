@@ -39,7 +39,7 @@ aligned prediction answer =
 classificationReport :: [[Action]] -> [[Action]] -> T.Text
 classificationReport predictions answers =
   let (alignedPredictions, alignedAnswers) = unzip $ map (\(prediction, answer) -> aligned prediction answer) (zip predictions answers)
-  in showClassificationReport 10 $ zip (join alignedPredictions) (join alignedAnswers)
+  in showClassificationReport 20 $ zip (join alignedPredictions) (join alignedAnswers)
 
 data TrainingConfig = TrainingConfig {
   iter :: Int, -- epoch数
@@ -75,7 +75,7 @@ training device TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, v
 
         (validationLoss, validationPrediction) <- evaluate device batchRNNG' IndexData {..}  validationData
         putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
-        sampleRandomData 5 (zip validationData validationPrediction) >>= printResult  
+        sampleRandomData 5 (zip validationData validationPrediction) >>= putStr . resultReport
         putStrLn "======================================"
         return ((batchRNNG', batchOpts'), validationLoss)
       step :: (Optimizer o) => RNNGSentence -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
@@ -163,16 +163,17 @@ sampleRandomData size xs = do
   return $ map (xs !!) randomIdxes
 
 
-printResult ::
+resultReport ::
   [(RNNGSentence, [Action])] ->
-  IO ()
-printResult result = forM_ result \(RNNGSentence (words, actions), predition) -> do
-  putStrLn "----------------------------------"
-  putStrLn $ "Sentence: " ++ show words
-  putStrLn $ "Actions:    " ++ show actions
-  putStrLn $ "Prediction: " ++ show predition
-  putStrLn "----------------------------------"
-  return ()
+  String
+resultReport result = unlines $ flip map result \(RNNGSentence (words, actions), predition) ->
+  unlines [
+      "----------------------------------",
+      "Sentence: " ++ show words,
+      "Actions:    " ++ show actions,
+      "Prediction: " ++ show predition
+    ]
+
 
 
 main :: IO()
@@ -187,7 +188,6 @@ main = do
       modelName = modelNameConfig config
       modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
-      reportFilePath = "reports/" ++ modelName ++ ".txt"
 
   -- data
   trainingData <- loadActionsFromBinary $ trainingDataPathConfig config
@@ -243,7 +243,7 @@ main = do
   print $ counts $ unknownActions actionIndexFor $ toActionList evaluationData
   
   -- | trainingデータの低頻度ラベル
-  putStrLn $ "Num of ow frequency (<= 10) label: "
+  putStr $ "Num of ow frequency (<= 10) label: "
   print $ length $ takeWhile (\x -> snd x <= 10) $ sortOn snd $ counts $ toNTList trainingData
 
   (_, evaluationPrediction) <- evaluate (modelDevice rnngSpec) rnngModel indexData evaluationData
@@ -252,6 +252,7 @@ main = do
   let correctIdxes = correctPredIdx 0 (zip answers evaluationPrediction)
   print $ map (\idx -> evaluationData !! idx) $ correctIdxes 
   print $ correctIdxes
-  -- T.writeFile reportFilePath $ classificationReport evaluationPrediction answers
-  -- sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= printResult
+  writeFile ("reports/" ++ modelName ++ "-result.txt") $ resultReport (zip evaluationData evaluationPrediction)
+  T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers
+  -- sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= resultReport
   return ()
