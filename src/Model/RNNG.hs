@@ -42,6 +42,10 @@ RNNG model
 
 -}
 
+
+data ParingMode = Point | All
+
+
 data PredictActionRNNG where
   PredictActionRNNG :: {
     bufferRNN :: RNNParams,
@@ -342,7 +346,7 @@ parse device (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..}
 
 predict ::
   Device ->
-  RuntimeMode ->
+  ParsingMode ->
   RNNG ->
   IndexData ->
   -- | actions
@@ -353,31 +357,31 @@ predict ::
   RNNGState ->
   -- | (predicted actions, new rnngState)
   ([Tensor], RNNGState)
-predict device Train _ _ [] results rnngState = (reverse results, rnngState)
-predict device Train rnng indexData (action:rest) predictionHitory rnngState =
+predict device Point _ _ [] results rnngState = (reverse results, rnngState)
+predict device Point rnng indexData (action:rest) predictionHitory rnngState =
   let prediction = predictNextAction device rnng rnngState indexData
       newRNNGState = parse device rnng indexData rnngState action
-  in predict device Train rnng indexData rest (prediction:predictionHitory) newRNNGState
+  in predict device Point rnng indexData rest (prediction:predictionHitory) newRNNGState
 
-predict device Eval rnng IndexData {..} _ predictionHitory RNNGState {..} =
+predict device All rnng IndexData {..} _ predictionHitory RNNGState {..} =
   if ((length textStack) == 1) && ((length textBuffer) == 0)
     then (reverse predictionHitory, RNNGState {..} )
   else
     let prediction = predictNextAction device rnng RNNGState {..} IndexData {..}
         action = indexActionFor (asValue (argmax (Dim 0) RemoveDim prediction)::Int)
         newRNNGState = parse device rnng IndexData {..} RNNGState {..} action
-    in predict device Eval rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
+    in predict device All rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
 
 
 rnngForward ::
   Device ->
-  RuntimeMode ->
+  ParingMode ->
   RNNG ->
   -- | functions to convert text to index
   IndexData ->
   RNNGSentence ->
   [Tensor]
-rnngForward device runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
+rnngForward device parsingMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
   let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . toDevice device . asTensor . wordIndexFor) sents
       initRNNGState = RNNGState {
         stack = [toDependent stackGuard],
@@ -390,4 +394,4 @@ rnngForward device runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) 
         hiddenActionHistory = actionRNNForward actionRNN (toDependent $ actionh0) (toDependent actionStart),
         numOpenParen = 0
       }
-  in fst $ predict device runTimeMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
+  in fst $ predict device parsingMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState

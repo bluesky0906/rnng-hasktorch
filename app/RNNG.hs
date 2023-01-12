@@ -23,6 +23,13 @@ import System.Random
 import Control.Monad
 
 
+data TrainingConfig = TrainingConfig {
+  iter :: Int, -- epoch数
+  validationStep :: Int,
+  learningRate :: LearningRate
+}
+
+
 -- | 推論したactionのサイズと異なる場合、-1で埋めて調整する
 aligned :: [Action] -> [Action] -> ([Action], [Action])
 aligned prediction answer = 
@@ -36,87 +43,12 @@ aligned prediction answer =
                         else answer
   in (alignedPrediction, alignedAnswer)
 
-classificationReport :: [[Action]] -> [[Action]] -> T.Text
-classificationReport predictions answers =
-  let (alignedPredictions, alignedAnswers) = unzip $ map (\(prediction, answer) -> aligned prediction answer) (zip predictions answers)
-  in showClassificationReport 20 $ zip (join alignedPredictions) (join alignedAnswers)
 
-data TrainingConfig = TrainingConfig {
-  iter :: Int, -- epoch数
-  validationStep :: Int,
-  learningRate :: LearningRate
-}
+{-
 
-training ::
-  (Optimizer o) =>
-  Device ->
-  TrainingConfig ->
-  (RNNG, o) ->
-  IndexData ->
-  -- | trainingData, validationData
-  ([RNNGSentence], [RNNGSentence]) ->
-  IO (RNNG, [[Float]])
-training device TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, validationData) = do
-    ((trained, _), losses) <- mapAccumM [1..iter] (rnng, (optim, optim, optim)) epochStep
-    return (trained, losses)
-    where
-      batches = makeBatch validationStep trainingData
-      epochStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), [Float])
-      epochStep epoch model = mapAccumM [1..(length batches)] model batchStep
-      -- | TODO:: Batch処理にする
-      batchStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
-      batchStep idx (batchRNNG, batchOpts) = do
-        let batch = batches !! (idx - 1)
-        ((batchRNNG', batchOpts'), batchLoss) <- mapAccumM batch (batchRNNG, batchOpts) step
-        
-        let trainingLoss = sum batchLoss / (fromIntegral (length batch)::Float)
-        putStrLn $ "#" ++ show idx 
-        putStrLn $ "Training Loss: " ++ show trainingLoss
+functions for analysis
 
-        (validationLoss, validationPrediction) <- evaluate device batchRNNG' IndexData {..}  validationData
-        putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
-        sampleRandomData 5 (zip validationData validationPrediction) >>= putStr . resultReport
-        putStrLn "======================================"
-        return ((batchRNNG', batchOpts'), validationLoss)
-      step :: (Optimizer o) => RNNGSentence -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
-      step rnngSentence@(RNNGSentence (_, actions)) (stepRNNG@(RNNG actionPredictRNNG parseRNNG compRNNG), (stepOpt1, stepOpt2, stepOpt3)) = do
-        let answer = toDevice device $ asTensor $ fmap actionIndexFor actions
-            output = rnngForward device Train stepRNNG IndexData {..}  rnngSentence
-        dropoutOutput <- forM output (dropout 0.2 True) 
-        let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
-        -- | パラメータ更新
-        (updatedActionPredictRNNG, stepOpt1') <- runStep actionPredictRNNG stepOpt1 loss learningRate
-        (updatedParseRNNG, stepOpt2') <- runStep parseRNNG stepOpt2 loss learningRate
-        (updatedCompRNNG, stepOpt3') <- if length (filter (== REDUCE) actions) > 1
-                                        then runStep compRNNG stepOpt3 loss learningRate
-                                      else return (compRNNG, stepOpt3)
-        return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (stepOpt1', stepOpt2', stepOpt3')), (asValue loss::Float))
-
-
-evaluate ::
-  Device ->
-  RNNG ->
-  IndexData ->
-  [RNNGSentence] ->
-  -- | (loss, predicted action sequence)
-  IO (Float, [[Action]])
-evaluate device rnng IndexData {..} rnngSentences = do
-  (_, result) <- mapAccumM rnngSentences rnng step
-  let (losses, predictions) = unzip result
-      size = fromIntegral (length rnngSentences)::Float
-  return ((sum losses) / size, reverse predictions)
-  where
-    step :: RNNGSentence -> RNNG -> IO (RNNG, (Float, [Action]))
-    step rnngSentence@(RNNGSentence (_, actions)) rnng' = do
-      let answer = toDevice device $ asTensor $ fmap actionIndexFor actions
-          output = rnngForward device Train rnng IndexData {..} rnngSentence
-          predictionTensor = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
-          prediction = fmap indexActionFor (asValue predictionTensor::[Int])
-          -- | lossの計算は答えと推論結果の系列長が同じ時だけ
-          loss = if length prediction == length prediction
-                  then nllLoss' answer (Torch.stack (Dim 0) output)
-                  else asTensor (0::Float)          
-      return (rnng', ((asValue loss::Float), prediction))
+-}
 
 checkCorrect ::
   [(Action, Action)] ->
@@ -144,24 +76,11 @@ unknownActions actionIndexFor [] = []
 unknownActions actionIndexFor (action:rest)
   | actionIndexFor action == 0 = action:(unknownActions actionIndexFor rest)
   | otherwise                  = unknownActions actionIndexFor rest
-{-
 
-  Util function for RNNG
-
--}
-
-sampleRandomData ::
-  -- | 取り出したいデータ数
-  Int ->
-  -- | データ
-  [a] ->
-  -- | サンプル結果
-  IO [a]
-sampleRandomData size xs = do
-  gen <- newStdGen
-  let randomIdxes = Data.List.take size $ nub $ randomRs (0, (length xs) - 1) gen
-  return $ map (xs !!) randomIdxes
-
+classificationReport :: [[Action]] -> [[Action]] -> T.Text
+classificationReport predictions answers =
+  let (alignedPredictions, alignedAnswers) = unzip $ map (\(prediction, answer) -> aligned prediction answer) (zip predictions answers)
+  in showClassificationReport 20 $ zip (join alignedPredictions) (join alignedAnswers)
 
 resultReport ::
   [(RNNGSentence, [Action])] ->
@@ -175,6 +94,84 @@ resultReport result = unlines $ flip map result \(RNNGSentence (words, actions),
     ]
 
 
+{-
+
+main functions
+
+-}
+
+training ::
+  (Optimizer o) =>
+  Device ->
+  TrainingConfig ->
+  (RNNG, o) ->
+  IndexData ->
+  -- | trainingData, validationData
+  ([RNNGSentence], [RNNGSentence]) ->
+  IO (RNNG, [[Float]])
+training device TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, validationData) = do
+  ((trained, _), losses) <- mapAccumM [1..iter] (rnng, (optim, optim, optim)) epochStep
+  return (trained, losses)
+  where
+    batches = makeBatch validationStep trainingData
+    epochStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), [Float])
+    epochStep epoch model = mapAccumM [1..(length batches)] model batchStep
+    -- | TODO:: Batch処理にする
+    batchStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
+    batchStep idx (batchRNNG, batchOpts) = do
+      let batch = batches !! (idx - 1)
+      ((batchRNNG', batchOpts'), batchLoss) <- mapAccumM batch (batchRNNG, batchOpts) step
+      
+      let trainingLoss = sum batchLoss / (fromIntegral (length batch)::Float)
+      putStrLn $ "#" ++ show idx 
+      putStrLn $ "Training Loss: " ++ show trainingLoss
+
+      (validationLoss, validationPrediction) <- evaluate device batchRNNG' IndexData {..}  validationData
+      putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
+      sampleRandomData 5 (zip validationData validationPrediction) >>= putStr . resultReport
+      putStrLn "======================================"
+      return ((batchRNNG', batchOpts'), validationLoss)
+    step :: (Optimizer o) => RNNGSentence -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
+    step rnngSentence@(RNNGSentence (_, actions)) (stepRNNG@(RNNG actionPredictRNNG parseRNNG compRNNG), (stepOpt1, stepOpt2, stepOpt3)) = do
+      let answer = toDevice device $ asTensor $ fmap actionIndexFor actions
+          output = rnngForward device Point stepRNNG IndexData {..}  rnngSentence
+      dropoutOutput <- forM output (dropout 0.2 True) 
+      let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
+      -- | パラメータ更新
+      (updatedActionPredictRNNG, stepOpt1') <- runStep actionPredictRNNG stepOpt1 loss learningRate
+      (updatedParseRNNG, stepOpt2') <- runStep parseRNNG stepOpt2 loss learningRate
+      (updatedCompRNNG, stepOpt3') <- if length (filter (== REDUCE) actions) > 1
+                                      then runStep compRNNG stepOpt3 loss learningRate
+                                    else return (compRNNG, stepOpt3)
+      return ((RNNG updatedActionPredictRNNG updatedParseRNNG updatedCompRNNG, (stepOpt1', stepOpt2', stepOpt3')), (asValue loss::Float))
+
+
+evaluate ::
+  Device ->
+  ParingMode ->
+  RNNG ->
+  IndexData ->
+  [RNNGSentence] ->
+  -- | (loss, predicted action sequence)
+  IO (Float, [[Action]])
+evaluate device parsingMode rnng IndexData {..} rnngSentences = do
+  (_, result) <- mapAccumM rnngSentences rnng step
+  let (losses, predictions) = unzip result
+      size = fromIntegral (length rnngSentences)::Float
+  return ((sum losses) / size, reverse predictions)
+  where
+    step :: RNNGSentence -> RNNG -> IO (RNNG, (Float, [Action]))
+    step rnngSentence@(RNNGSentence (_, actions)) rnng' = do
+      let answer = toDevice device $ asTensor $ fmap actionIndexFor actions
+          output = rnngForward device parsingMode rnng IndexData {..} rnngSentence
+          predictionTensor = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
+          prediction = fmap indexActionFor (asValue predictionTensor::[Int])
+          -- | lossの計算は答えと推論結果の系列長が同じ時だけ
+          loss = if length prediction == length prediction
+                  then nllLoss' answer (Torch.stack (Dim 0) output)
+                  else asTensor (0::Float)          
+      return (rnng', ((asValue loss::Float), prediction))
+
 
 main :: IO()
 main = do
@@ -183,7 +180,6 @@ main = do
   putStrLn "Experiment Setting: "
   print config
   putStrLn "======================================"
-
   let mode = modeConfig config
       modelName = modelNameConfig config
       modelFilePath = "models/" ++ modelName
@@ -229,30 +225,30 @@ main = do
     (trained, losses) <- training device trainingConfig (initRNNGModel, optim) indexData (trainingData, validationData)
 
     -- | model保存
-    B.encodeFile modelSpecPath rnngSpec
     Torch.Train.saveParams trained modelFilePath
     drawLearningCurve ("imgs/" ++ modelName ++ ".png") "Learning Curve" [("", reverse $ concat losses)]
 
-  -- | evaluation
-  rnngSpec <- (B.decodeFile modelSpecPath)::(IO RNNGSpec)
-  rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
-  let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
+  when (mode == "Eval") $ do
+    rnngSpec <- (B.decodeFile modelSpecPath)::(IO RNNGSpec)
+    rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
+    let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
 
-  -- | training dataにないactionとその頻度
-  putStrLn $ "Unknown Actions and their frequency: "
-  print $ counts $ unknownActions actionIndexFor $ toActionList evaluationData
-  
-  -- | trainingデータの低頻度ラベル
-  putStr $ "Num of ow frequency (<= 10) label: "
-  print $ length $ takeWhile (\x -> snd x <= 10) $ sortOn snd $ counts $ toNTList trainingData
+    -- | training dataにないactionとその頻度
+    putStrLn $ "Unknown Actions and their frequency: "
+    print $ counts $ unknownActions actionIndexFor $ toActionList evaluationData
+    
+    -- | trainingデータの低頻度ラベル
+    putStr $ "Num of ow frequency (<= 10) label: "
+    print $ length $ takeWhile (\x -> snd x <= 10) $ sortOn snd $ counts $ toNTList trainingData
 
-  (_, evaluationPrediction) <- evaluate (modelDevice rnngSpec) rnngModel indexData evaluationData
+    (_, evaluationPrediction) <- evaluate (modelDevice rnngSpec) rnngModel indexData evaluationData
 
-  -- | 全て正解の文を抜き出してくる
-  let correctIdxes = correctPredIdx 0 (zip answers evaluationPrediction)
-  print $ map (\idx -> evaluationData !! idx) $ correctIdxes 
-  print $ correctIdxes
-  writeFile ("reports/" ++ modelName ++ "-result.txt") $ resultReport (zip evaluationData evaluationPrediction)
-  T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers
-  -- sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= resultReport
-  return ()
+    -- | 全て正解の文を抜き出してくる
+    let correctIdxes = correctPredIdx 0 (zip answers evaluationPrediction)
+    print $ map (\idx -> evaluationData !! idx) $ correctIdxes 
+    print $ correctIdxes
+
+    -- | 分析結果を出力
+    writeFile ("reports/" ++ modelName ++ "-result.txt") $ resultReport (zip evaluationData evaluationPrediction)
+    T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers
+    -- sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= resultReport

@@ -50,6 +50,12 @@ indexFactory dic unk padding =
     wordToIndexFactory map wrd = M.findWithDefault 0 wrd map
     indexToWordFactory map idx = M.findWithDefault unk idx map
 
+{-
+
+nlp-toolsに移動したい
+
+-}
+
 counts :: Ord a => [a] -> [(a, Int)]
 counts = map count . group . sort
   where count xs = (head xs, length xs)
@@ -64,11 +70,25 @@ drawHistgram ::
   IO()
 drawHistgram filepath title lst = do
   let strlst = fmap show lst
-      freqlstWithIdx = zip [0..] $ reverse $ sortOn snd $ counts strlst
+      freqlstWithIdx = zip [0..] $ sortOn (Down . snd) $ counts strlst
       dataForPlot = fmap (\(idx, freq) -> (idx, snd freq)) freqlstWithIdx
       xTicks = unwords $ fmap (\(idx, (str, _)) -> "'"++ str ++ "'" ++ " " ++ show idx) freqlstWithIdx
   print $ length $ takeWhile (\x -> snd x > 1) dataForPlot
   plotPathStyle [(PNG filepath), (Title title), (XRange (0, fromIntegral (length dataForPlot)::Double))] (defaultStyle {plotType = Boxes}) dataForPlot
+
+
+sampleRandomData ::
+  -- | 取り出したいデータ数
+  Int ->
+  -- | データ
+  [a] ->
+  -- | サンプル結果
+  IO [a]
+sampleRandomData size xs = do
+  gen <- newStdGen
+  let randomIdxes = Data.List.take size $ nub $ randomRs (0, (length xs) - 1) gen
+  return $ map (xs !!) randomIdxes
+
 
 {-
 
