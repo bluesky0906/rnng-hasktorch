@@ -53,12 +53,12 @@ saveActionData ::
   IO()
 saveActionData grammar dirsPath outputPath = do
   -- 指定されたディレクトリ以下のファイルを取得
-  filePaths <- fmap concat $ traverse id $ fmap (listFiles grammar) dirsPath 
+  filePaths <- fmap concat $ traverse (listFiles grammar) dirsPath 
   --readmeは除外
   treess <- mapM (parseTreefile grammar) $ filter (\f -> takeBaseName f /= "readme") filePaths
   let trees = concat treess
       parsedTrees = filter (not . isErr) $ trees
-  mapM_ (putStrLn . show) $ filter isErr $ trees
+  mapM_ print $ filter isErr $ trees
   let rnngSentences = traverseTrees parsedTrees
   saveActionsToBinary outputPath rnngSentences
   -- content <- loadActionsFromBinary outputPath

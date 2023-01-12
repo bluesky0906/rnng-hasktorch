@@ -43,7 +43,7 @@ RNNG model
 -}
 
 
-data ParingMode = Point | All
+data ParsingMode = Point | All
 
 
 data PredictActionRNNG where
@@ -375,7 +375,7 @@ predict device All rnng IndexData {..} _ predictionHitory RNNGState {..} =
 
 rnngForward ::
   Device ->
-  ParingMode ->
+  ParsingMode ->
   RNNG ->
   -- | functions to convert text to index
   IndexData ->

@@ -31,7 +31,8 @@ The experiment is configured in `config.dhall`. If you want to change the config
 
 |  Config name  |    |
 | ---- | ---- |
-|  modeConfig  |  Choose `Train` or `Eval` mode |
+|  modeConfig  |　Choose `Train` or `Eval` mode |
+|  **parsingModeConfig | Parsing mode during `Eval` mode <br>　`Point`: Use correct data for prediction results before each time step <br>　`All`　: All actions are predicted by the learned model|
 |  trainingDataPathConfig | Training data created in `Preprocessing`  |
 |  validationDataPathConfig | Validation data created in `Preprocessing`  |
 |  evaliationDataPathConfig | Evaliation data created in `Preprocessing`  |
@@ -45,7 +46,9 @@ The experiment is configured in `config.dhall`. If you want to change the config
 |  *modelNameConfig  | Name of model (to be saved during `Train` mode \| to be loaded during `Eval` mode) |
 
 <div style="text-align: right;">
-*used only by Train mode
+*used only by `Train` mode
+
+**used only by `Eval` mode
 </div>
 Run the following command to train or evaluate of RNNG.
 ```

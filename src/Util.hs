@@ -8,6 +8,7 @@ import Data.List.Split (chunksOf, splitEvery) --split
 import Data.List as L
 import Data.Ord
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
+import System.Random
 import Dhall hiding ( map )
 import Graphics.Gnuplot.Simple
 
@@ -20,7 +21,7 @@ maxLengthFor :: [[a]] -> Int
 maxLengthFor list = length $ L.maximumBy (comparing length) list
 
 padding :: Int -> [Int] -> [Int]
-padding maxLength list = list ++ take (maxLength - (length list)) (repeat 1)
+padding maxLength list = list ++ replicate (maxLength - (length list)) 1
 
 -- |  batchごとに分けられたデータをpaddingしてindex化する
 indexForBatch ::
@@ -86,7 +87,7 @@ sampleRandomData ::
   IO [a]
 sampleRandomData size xs = do
   gen <- newStdGen
-  let randomIdxes = Data.List.take size $ nub $ randomRs (0, (length xs) - 1) gen
+  let randomIdxes = L.take size $ nub $ randomRs (0, (length xs) - 1) gen
   return $ map (xs !!) randomIdxes
 
 
@@ -96,7 +97,7 @@ for Config file
 
 -}
 
-getProjectRoot :: IO (String)
+getProjectRoot :: IO String
 getProjectRoot = do
   projectRoot <- getProjectRootWeightedCurrent
   return (case projectRoot of
@@ -106,6 +107,7 @@ getProjectRoot = do
 
 data Config = Config { 
   modeConfig :: String, 
+  parsingModeConfig :: String, 
   trainingDataPathConfig :: String,
   validationDataPathConfig :: String,
   evaluationDataPathConfig :: String,

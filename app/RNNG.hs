@@ -19,7 +19,6 @@ import qualified Data.Binary as B
 import Data.List
 import Data.Functor
 import Debug.Trace
-import System.Random
 import Control.Monad
 
 
@@ -126,7 +125,7 @@ training device TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, v
       putStrLn $ "#" ++ show idx 
       putStrLn $ "Training Loss: " ++ show trainingLoss
 
-      (validationLoss, validationPrediction) <- evaluate device batchRNNG' IndexData {..}  validationData
+      (validationLoss, validationPrediction) <- evaluate device Point batchRNNG' IndexData {..}  validationData
       putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
       sampleRandomData 5 (zip validationData validationPrediction) >>= putStr . resultReport
       putStrLn "======================================"
@@ -148,7 +147,7 @@ training device TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, v
 
 evaluate ::
   Device ->
-  ParingMode ->
+  ParsingMode ->
   RNNG ->
   IndexData ->
   [RNNGSentence] ->
@@ -214,7 +213,7 @@ main = do
         device = Device CUDA 0
         rnngSpec = RNNGSpec device wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
     initRNNGModel <- toDevice device <$> sample rnngSpec
-    B.encodeFile modelSpecPath rnngSpec
+
     -- | training
     let trainingConfig = TrainingConfig {
                            iter = fromIntegral (epochConfig config)::Int,
@@ -226,9 +225,14 @@ main = do
 
     -- | model保存
     Torch.Train.saveParams trained modelFilePath
+    B.encodeFile modelSpecPath rnngSpec
     drawLearningCurve ("imgs/" ++ modelName ++ ".png") "Learning Curve" [("", reverse $ concat losses)]
 
   when (mode == "Eval") $ do
+    let parsingMode = case parsingModeConfig config of 
+                        "Point" -> Point
+                        "All" -> All
+
     rnngSpec <- (B.decodeFile modelSpecPath)::(IO RNNGSpec)
     rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
     let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
@@ -241,7 +245,7 @@ main = do
     putStr $ "Num of ow frequency (<= 10) label: "
     print $ length $ takeWhile (\x -> snd x <= 10) $ sortOn snd $ counts $ toNTList trainingData
 
-    (_, evaluationPrediction) <- evaluate (modelDevice rnngSpec) rnngModel indexData evaluationData
+    (_, evaluationPrediction) <- evaluate (modelDevice rnngSpec) parsingMode rnngModel indexData evaluationData
 
     -- | 全て正解の文を抜き出してくる
     let correctIdxes = correctPredIdx 0 (zip answers evaluationPrediction)
