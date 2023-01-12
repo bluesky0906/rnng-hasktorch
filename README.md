@@ -1,4 +1,7 @@
-# rnng-hasktorch
+# Recurrent Neaural Network Grammars (RNNGs) based on hasktorch
+
+This repository provides an RNNG implemented in haskell.
+In addition, this model can handle not only Context Free Grammar (CFG) but also Combinatory Categorial Grammar (CCG) as an internal syntax grammar.
 
 ## Pre-requirements
 #### hasktorch
@@ -12,16 +15,39 @@ This library contains useful functions for building neural network model.
 Edit the hasktorch and hasktorch-tools paths in `stack.yaml` to match your environment.
 
 ## Data Preparation
-RNNG use WSJ directory of PennTreeBank as data for English.
+RNNGs use Wall Street Jarnal corpus of Penn Treebank or CCGbank as data for English.
 - Training data : \$2 - \$21
 - Validation data : \$23
 - Evaluation data : \$24
 
-Run the following command to preprocess those data for rnng-hasktorch.
+Run the following command to preprocess those data for rnng-hasktorch. This command generates three files (training[grammar], validation[grammar] and evaluation[grammar]) under the `data/` repository.
 
 ```
-$ stack run Preprocessing -- --path [/path/to/wsj]
+$ stack run Preprocessing -- --path [/path/to/wsj] --grammar [CFG or CCG]
 ```
 
 ## Training and Evaluation
-Developing...
+The experiment is configured in `config.dhall`. If you want to change the configuration, rewrite this file.
+
+|  Config name  |    |
+| ---- | ---- |
+|  modeConfig  |  Choose `Train` or `Eval` mode |
+|  trainingDataPathConfig | Training data created in `Preprocessing`  |
+|  validationDataPathConfig | Validation data created in `Preprocessing`  |
+|  evaliationDataPathConfig | Evaliation data created in `Preprocessing`  |
+|  actionEmbedSizeConfig | Size ofAction embedding  |
+|  wordEmbedSizeConfig | Size of word embedding  |
+|  hiddenSizeConfig | Size of hidden Layer |
+|  numOfLayerConfig | Number of LSTM  layer |
+|  learningRateConfig | Learning late during `Train` mode |
+|  *epochConfig  | Number of epoch during training |
+|  *validationStepConfig  | How many steps to validate every during `Train` mode |
+|  *modelNameConfig  | Name of model (to be saved during `Train` mode \| to be loaded during `Eval` mode) |
+
+<div style="text-align: right;">
+*used only by Train mode
+</div>
+Run the following command to train or evaluate of RNNG.
+```
+$ stack run RNNG
+```
