@@ -1,4 +1,3 @@
-{-#  LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
@@ -42,8 +41,7 @@ cfgsParser = do
   _ <- optional blank
   _ <- optional $ string copyRight
   _ <- optional blank
-  trees <- sepBy1' cfgParser blank
-  return trees
+  sepBy1' cfgParser blank
 
 cfgParser :: Parser Tree
 cfgParser = do
@@ -77,9 +75,7 @@ phraseParser = do
   return $ Phrase (label, tree)
 
 wordParser :: Parser Tree
-wordParser = do
-  word <- literal
-  return $ Word word
+wordParser = Word <$> literal
 
 sepBy1' :: (Stream s m t) => ParsecT s u m a -> ParsecT s u m sep -> ParsecT s u m [a]
 {-# INLINABLE sepBy1' #-}

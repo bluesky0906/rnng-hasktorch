@@ -7,18 +7,24 @@ import qualified Data.Map.Strict as M
 import Data.List.Split (chunksOf, splitEvery) --split
 import Data.List as L
 import Data.Ord
-
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
+import System.Random
 import Dhall hiding ( map )
+import Graphics.Gnuplot.Simple
 
+{-
 
+汎用的な関数　(hasktorch-toolsに移動したい)
+
+-}
 maxLengthFor :: [[a]] -> Int
 maxLengthFor list = length $ L.maximumBy (comparing length) list
 
 padding :: Int -> [Int] -> [Int]
-padding maxLength list = list ++ take (maxLength - (length list)) (repeat 1)
+padding maxLength list = list ++ replicate (maxLength - (length list)) 1
 
-indexForBatch :: 
+-- |  batchごとに分けられたデータをpaddingしてindex化する
+indexForBatch ::
   (a -> Int) ->
   [[a]] ->
   [[Int]]
@@ -45,7 +51,53 @@ indexFactory dic unk padding =
     wordToIndexFactory map wrd = M.findWithDefault 0 wrd map
     indexToWordFactory map idx = M.findWithDefault unk idx map
 
-getProjectRoot :: IO (String)
+{-
+
+nlp-toolsに移動したい
+
+-}
+
+counts :: Ord a => [a] -> [(a, Int)]
+counts = map count . group . sort
+  where count xs = (head xs, length xs)
+
+-- TODO: X軸の表示
+-- unused
+drawHistgram ::
+  (Ord a, Show a) =>
+  FilePath ->
+  String ->
+  [a] ->
+  IO()
+drawHistgram filepath title lst = do
+  let strlst = fmap show lst
+      freqlstWithIdx = zip [0..] $ sortOn (Down . snd) $ counts strlst
+      dataForPlot = fmap (\(idx, freq) -> (idx, snd freq)) freqlstWithIdx
+      xTicks = unwords $ fmap (\(idx, (str, _)) -> "'"++ str ++ "'" ++ " " ++ show idx) freqlstWithIdx
+  print $ length $ takeWhile (\x -> snd x > 1) dataForPlot
+  plotPathStyle [(PNG filepath), (Title title), (XRange (0, fromIntegral (length dataForPlot)::Double))] (defaultStyle {plotType = Boxes}) dataForPlot
+
+
+sampleRandomData ::
+  -- | 取り出したいデータ数
+  Int ->
+  -- | データ
+  [a] ->
+  -- | サンプル結果
+  IO [a]
+sampleRandomData size xs = do
+  gen <- newStdGen
+  let randomIdxes = L.take size $ nub $ randomRs (0, (length xs) - 1) gen
+  return $ map (xs !!) randomIdxes
+
+
+{-
+
+for Config file
+
+-}
+
+getProjectRoot :: IO String
 getProjectRoot = do
   projectRoot <- getProjectRootWeightedCurrent
   return (case projectRoot of
@@ -54,17 +106,19 @@ getProjectRoot = do
 
 
 data Config = Config { 
-  getTrainingDataPath :: String,
-  getValidationDataPath :: String,
-  getEvaluationDataPath :: String,
-  getTrial :: Natural,
-  getEpoch :: Natural,
-  getActionEmbedSize :: Natural,
-  getWordEmbedSize :: Natural,
-  getHiddenSize :: Natural,
-  getNumLayer :: Natural,
-  getLearningRate :: Double,
-  getModelName :: String
+  modeConfig :: String, 
+  parsingModeConfig :: String, 
+  trainingDataPathConfig :: String,
+  validationDataPathConfig :: String,
+  evaluationDataPathConfig :: String,
+  epochConfig :: Natural,
+  validationStepConfig :: Natural,
+  actionEmbedSizeConfig :: Natural,
+  wordEmbedSizeConfig :: Natural,
+  hiddenSizeConfig :: Natural,
+  numOfLayerConfig :: Natural,
+  learningRateConfig :: Double,
+  modelNameConfig :: String
   } deriving (Generic, Show)
 
 instance FromDhall Config

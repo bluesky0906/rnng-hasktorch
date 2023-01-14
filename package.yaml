@@ -41,6 +41,7 @@ dependencies:
 - gnuplot
 - process
 - random
+- binary
 
 library:
   source-dirs: src

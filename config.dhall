@@ -1,13 +1,15 @@
 {
-  getTrainingDataPath = "data/trainingCCG",
-  getValidationDataPath = "data/validationCCG",
-  getEvaluationDataPath = "data/evaluationCCG",
-  getTrial = 3,
-  getEpoch = 400,
-  getActionEmbedSize = 128,
-  getWordEmbedSize = 128,
-  getHiddenSize = 128,
-  getNumLayer = 2,
-  getLearningRate = 1e-2,
-  getModelName = "rnng-hasktorch-ccg",
+  modeConfig = "Train", -- | Train or Eval
+  parsingModeConfig = "Point", -- | Point or All
+  trainingDataPathConfig = "data/trainingCFG",
+  validationDataPathConfig = "data/validationCFG",
+  evaluationDataPathConfig = "data/evaluationCFG",
+  epochConfig = 1, --only for training 
+  validationStepConfig = 00, --only for training 
+  actionEmbedSizeConfig = 128, --only for training 
+  wordEmbedSizeConfig = 128, --only for training 
+  hiddenSizeConfig = 128, --only for training 
+  numOfLayerConfig = 2, --only for training 
+  learningRateConfig = 1e-2, --only for training 
+  modelNameConfig = "rnng-hasktorch-cfg"
 }
