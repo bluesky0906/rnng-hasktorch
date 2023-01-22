@@ -167,7 +167,8 @@ evaluate mode@Mode{..} rnng IndexData {..} rnngSentences = do
           -- | lossの計算は答えと推論結果の系列長が同じ時だけ
           loss = if length prediction == length prediction
                   then nllLoss' answer (Torch.stack (Dim 0) output)
-                  else asTensor (0::Float)          
+                  else asTensor (0::Float) 
+      print prediction        
       return (rnng', ((asValue loss::Float), prediction))
 
 

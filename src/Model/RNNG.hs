@@ -217,7 +217,7 @@ checkREDUCEForbidden ::
   Bool
 checkREDUCEForbidden Mode{..} RNNGState {..} =
   length textStack < 2  -- first action must be NT and don't predict POS
-  || (numOpenParen == 1 && null textBuffer) -- bufferに単語が残ってるのに木を一つにまとめることはできない
+  || (numOpenParen == 1 && not (null textBuffer)) -- bufferに単語が残ってるのに木を一つにまとめることはできない
   || ((previousAction /= SHIFT) && (previousAction /= REDUCE)) && (previousAction /= ERROR) -- can't REDUCE after NT
   where 
     previousAction = if not (null textActionHistory)
