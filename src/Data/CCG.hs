@@ -25,24 +25,24 @@ parse text file to CCGTree
 
 -}
 
-parseCCGfile :: FilePath -> IO [Tree]
-parseCCGfile filePath = do
+parseCCGfile :: Bool -> FilePath -> IO [Tree]
+parseCCGfile posMode filePath = do
   ccg <- T.readFile filePath
-  return $ parseCCGTrees ccg
+  return $ (parseCCGTrees posMode) ccg
 
-parseCCGTrees :: T.Text -> [Tree]
-parseCCGTrees text =
-  case parse ccgsParser "" text of
+parseCCGTrees :: Bool -> T.Text -> [Tree]
+parseCCGTrees posMode text =
+  case parse (ccgsParser posMode) "" text of
     Left e -> [Err (show e) text]
     Right t -> t
 
-ccgsParser :: Parser [Tree]
-ccgsParser = many1 ccgParser
+ccgsParser :: Bool -> Parser [Tree]
+ccgsParser posMode = many1 (ccgParser posMode)
 
-ccgParser :: Parser Tree
-ccgParser = do
+ccgParser :: Bool -> Parser Tree
+ccgParser posMode = do
   ignoreSentenceInfo
-  tree <- try nonLeafParser <|> headLeafParser
+  tree <- try nonLeafParser <|> headLeafParser posMode
   optional newline
   return tree
 
@@ -73,8 +73,8 @@ closeAngleBracket :: Parser T.Text
 closeAngleBracket = T.singleton <$> char '>'
 
 -- | １単語のみのデータに対応
-headLeafParser :: Parser Tree
-headLeafParser = do
+headLeafParser :: Bool -> Parser Tree
+headLeafParser posMode = do
   openParen
   openAngleBracket
   char 'L'
@@ -91,7 +91,9 @@ headLeafParser = do
   closeAngleBracket
   closeParen
   blank
-  return $ Phrase (category, [Phrase (pos, [Word word])])
+  if posMode 
+    then return $ Phrase (category, [Word word])
+    else return $ Phrase (category, [Phrase (pos, [Word word])])
 
 leafParser :: Parser Tree
 leafParser = do

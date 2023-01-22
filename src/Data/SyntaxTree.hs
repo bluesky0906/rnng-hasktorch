@@ -27,18 +27,20 @@ isErr cfg = case cfg of
   Err _ _ -> True
 
 
-traverseTrees :: [Tree] -> [RNNGSentence]
-traverseTrees = map (reverseRNNGSentence . traverseTree (RNNGSentence ([], [])))
+traverseTrees :: Bool -> [Tree] -> [RNNGSentence]
+traverseTrees posMode = map (reverseRNNGSentence . traverseTree posMode (RNNGSentence ([], [])))
 
-traverseTree :: RNNGSentence -> Tree -> RNNGSentence
+traverseTree :: Bool -> RNNGSentence -> Tree -> RNNGSentence
+traverseTree True (RNNGSentence (words, actions)) (Phrase (label, Word word:rest)) =
+  RNNGSentence (word:words, SHIFT:NT label:actions)
 -- POSタグは無視する
-traverseTree (RNNGSentence (words, actions)) (Phrase (_, Word word:rest)) =
+traverseTree False (RNNGSentence (words, actions)) (Phrase (_, Word word:rest)) =
   RNNGSentence (word:words, SHIFT:actions)
-traverseTree (RNNGSentence (words, actions)) (Phrase (label, trees)) =
+traverseTree posMode (RNNGSentence (words, actions)) (Phrase (label, trees)) =
   RNNGSentence (newWords, REDUCE:newActions)
   where
-    RNNGSentence (newWords, newActions) = L.foldl traverseTree (RNNGSentence (words, NT label:actions)) trees
-traverseTree (RNNGSentence (words, actions)) (Err message text)  = RNNGSentence (words, ERROR:actions)
+    RNNGSentence (newWords, newActions) = L.foldl (traverseTree posMode) (RNNGSentence (words, NT label:actions)) trees
+traverseTree _ (RNNGSentence (words, actions)) (Err message text)  = RNNGSentence (words, ERROR:actions)
 
 
 printTrees :: 
