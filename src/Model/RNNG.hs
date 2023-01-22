@@ -27,6 +27,7 @@ deriving instance Binary Device
 
 data RNNGSpec = RNNGSpec {
   modelDevice :: Device,
+  modelPosMode :: Bool,
   wordEmbedSize :: Int,
   actionEmbedSize :: Int,
   wordNumEmbed :: Int,
@@ -180,6 +181,15 @@ instance Show RNNGState where
       "numOpenParen: " ++ show numOpenParen
     ]
 
+data Mode where
+  Mode ::
+    {
+      device :: Device,
+      parsingMode :: ParsingMode,
+      posMode :: Bool
+    } ->
+    Mode
+
 {-
 
 mask Forbidden actions
@@ -187,41 +197,51 @@ mask Forbidden actions
 -}
 
 checkNTForbidden ::
+  Mode ->
   RNNGState ->
   Bool
-checkNTForbidden RNNGState {..} =
+checkNTForbidden Mode{..} RNNGState {..} =
   numOpenParen > 100 -- 開いているNTが多すぎる時
-  || length textBuffer == 0 -- 単語が残っていない時
-  
+  || null textBuffer-- 単語が残っていない時
+  || if posMode 
+     then (previousAction /= SHIFT) && (previousAction /= REDUCE) && (previousAction /= ERROR) -- must SHIFT after NT
+     else False
+  where 
+    previousAction = if not (null textActionHistory)
+                      then head textActionHistory
+                      else ERROR
+
 checkREDUCEForbidden ::
+  Mode ->
   RNNGState ->
   Bool
-checkREDUCEForbidden RNNGState {..} =
+checkREDUCEForbidden Mode{..} RNNGState {..} =
   length textStack < 2  -- first action must be NT and don't predict POS
-  || (numOpenParen == 1 && length textBuffer > 0) -- bufferに単語が残ってるのに木を一つにまとめることはできない
-  || ((previousAction /= SHIFT) && (previousAction /= REDUCE)) -- can't REDUCE after NT
+  || (numOpenParen == 1 && null textBuffer) -- bufferに単語が残ってるのに木を一つにまとめることはできない
+  || ((previousAction /= SHIFT) && (previousAction /= REDUCE)) && (previousAction /= ERROR) -- can't REDUCE after NT
   where 
-    previousAction = if length textActionHistory > 0
+    previousAction = if not (null textActionHistory)
                       then head textActionHistory
                       else ERROR
 
 checkSHIFTForbidden ::
+  Mode ->
   RNNGState ->
   Bool
-checkSHIFTForbidden RNNGState{..} =
-  length textStack == 0 -- first action must be NT
-  || length textBuffer == 0 -- Buffer isn't empty
+checkSHIFTForbidden _ RNNGState{..} =
+  null textStack -- first action must be NT
+  || null textBuffer -- Buffer isn't empty
 
 maskTensor :: 
-  Device ->
+  Mode ->
   RNNGState ->
   [Action] ->
   Tensor
-maskTensor device rnngState actions = toDevice device $ asTensor $ map mask actions
+maskTensor mode@Mode{..} rnngState actions = toDevice device $ asTensor $ map mask actions
   where 
-    ntForbidden = checkNTForbidden rnngState
-    reduceForbidden = checkREDUCEForbidden rnngState
-    shiftForbidden = checkSHIFTForbidden rnngState
+    ntForbidden = checkNTForbidden mode rnngState
+    reduceForbidden = checkREDUCEForbidden mode rnngState
+    shiftForbidden = checkSHIFTForbidden mode rnngState
     mask :: Action -> Bool
     mask ERROR = True
     mask (NT _) = ntForbidden
@@ -229,14 +249,14 @@ maskTensor device rnngState actions = toDevice device $ asTensor $ map mask acti
     mask SHIFT = shiftForbidden
 
 maskImpossibleAction ::
-  Device ->
+  Mode ->
   Tensor ->
   RNNGState ->
   IndexData ->
   Tensor
-maskImpossibleAction device prediction rnngState IndexData {..}  =
+maskImpossibleAction mode prediction rnngState IndexData {..}  =
   let actions = map indexActionFor [0..((shape prediction !! 0) - 1)]
-      boolTensor = maskTensor device rnngState actions
+      boolTensor = maskTensor mode rnngState actions
   in maskedFill prediction boolTensor (1e-38::Float)
 
 
@@ -247,20 +267,20 @@ RNNG Forward
 -}
 
 predictNextAction ::
-  Device -> 
+  Mode -> 
   RNNG ->
   -- | data
   RNNGState ->
   IndexData ->
   -- | possibility of actions
   Tensor
-predictNextAction device (RNNG PredictActionRNNG {..} _ _) RNNGState {..} indexData = 
-  let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent $ bufferh0) buffer
+predictNextAction mode (RNNG PredictActionRNNG {..} _ _) RNNGState {..} indexData = 
+  let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent bufferh0) buffer
       stackEmbedding = snd $ head hiddenStack
       actionEmbedding = hiddenActionHistory
       ut = Torch.tanh $ ((cat (Dim 0) [stackEmbedding, bufferEmbedding, actionEmbedding]) `matmul` (toDependent w) + (toDependent c))
       actionLogit = linearLayer linearParams ut
-      maskedAction = maskImpossibleAction device actionLogit RNNGState {..} indexData
+      maskedAction = maskImpossibleAction mode actionLogit RNNGState {..} indexData
   in logSoftmax (Dim 0) $ maskedAction
 
 stackLSTMForward :: 
@@ -284,7 +304,7 @@ actionRNNForward ::
 actionRNNForward actionRNN hn newElem = snd $ rnnLayer actionRNN hn [newElem]
 
 parse ::
-  Device ->
+  Mode ->
   -- | model
   RNNG ->
   IndexData ->
@@ -292,7 +312,7 @@ parse ::
   RNNGState ->
   Action ->
   RNNGState
-parse device (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
+parse Mode {..} (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) =
   let nt_embedding = embedding' (toDependent ntEmbedding) ((toDevice device . asTensor . ntIndexFor) label)
       textAction = NT label
       action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
@@ -307,7 +327,7 @@ parse device (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT label) 
       hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
       numOpenParen = numOpenParen + 1
     }
-parse device (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
+parse Mode {..} (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
   let textAction = SHIFT
       action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
   in RNNGState {
@@ -321,7 +341,7 @@ parse device (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
       hiddenActionHistory = actionRNNForward actionRNN hiddenActionHistory action_embedding,
       numOpenParen = numOpenParen
     }
-parse device (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
+parse Mode {..} (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
   let textAction = REDUCE
       action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
       -- | 開いたlabelのidxを特定する
@@ -345,8 +365,7 @@ parse device (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..}
     }
 
 predict ::
-  Device ->
-  ParsingMode ->
+  Mode ->
   RNNG ->
   IndexData ->
   -- | actions
@@ -357,31 +376,30 @@ predict ::
   RNNGState ->
   -- | (predicted actions, new rnngState)
   ([Tensor], RNNGState)
-predict device Point _ _ [] results rnngState = (reverse results, rnngState)
-predict device Point rnng indexData (action:rest) predictionHitory rnngState =
-  let prediction = predictNextAction device rnng rnngState indexData
-      newRNNGState = parse device rnng indexData rnngState action
-  in predict device Point rnng indexData rest (prediction:predictionHitory) newRNNGState
+predict mode@(Mode _ Point _) _ _ [] results rnngState = (reverse results, rnngState)
+predict mode@(Mode _ Point _) rnng indexData (action:rest) predictionHitory rnngState =
+  let prediction = predictNextAction mode rnng rnngState indexData
+      newRNNGState = parse mode rnng indexData rnngState action
+  in predict mode rnng indexData rest (prediction:predictionHitory) newRNNGState
 
-predict device All rnng IndexData {..} _ predictionHitory RNNGState {..} =
+predict mode@(Mode _ All _) rnng IndexData {..} _ predictionHitory RNNGState {..} =
   if ((length textStack) == 1) && ((length textBuffer) == 0)
     then (reverse predictionHitory, RNNGState {..} )
   else
-    let prediction = predictNextAction device rnng RNNGState {..} IndexData {..}
+    let prediction = predictNextAction mode rnng RNNGState {..} IndexData {..}
         action = indexActionFor (asValue (argmax (Dim 0) RemoveDim prediction)::Int)
-        newRNNGState = parse device rnng IndexData {..} RNNGState {..} action
-    in predict device All rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
+        newRNNGState = parse mode rnng IndexData {..} RNNGState {..} action
+    in predict mode rnng IndexData {..}  [] (prediction:predictionHitory) newRNNGState
 
 
 rnngForward ::
-  Device ->
-  ParsingMode ->
+  Mode ->
   RNNG ->
   -- | functions to convert text to index
   IndexData ->
   RNNGSentence ->
   [Tensor]
-rnngForward device parsingMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
+rnngForward mode@Mode{..} (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
   let sentsTensor = fmap ((embedding' (toDependent wordEmbedding)) . toDevice device . asTensor . wordIndexFor) sents
       initRNNGState = RNNGState {
         stack = [toDependent stackGuard],
@@ -394,4 +412,4 @@ rnngForward device parsingMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) 
         hiddenActionHistory = actionRNNForward actionRNN (toDependent $ actionh0) (toDependent actionStart),
         numOpenParen = 0
       }
-  in fst $ predict device parsingMode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
+  in fst $ predict mode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState

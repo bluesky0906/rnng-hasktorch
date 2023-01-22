@@ -107,7 +107,8 @@ getProjectRoot = do
 
 data Config = Config { 
   modeConfig :: String, 
-  parsingModeConfig :: String, 
+  parsingModeConfig :: String,
+  posModeConfig :: Bool,
   trainingDataPathConfig :: String,
   validationDataPathConfig :: String,
   evaluationDataPathConfig :: String,
