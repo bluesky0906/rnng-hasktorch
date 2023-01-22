@@ -168,7 +168,6 @@ evaluate mode@Mode{..} rnng IndexData {..} rnngSentences = do
           loss = if length prediction == length prediction
                   then nllLoss' answer (Torch.stack (Dim 0) output)
                   else asTensor (0::Float) 
-      print prediction        
       return (rnng', ((asValue loss::Float), prediction))
 
 
