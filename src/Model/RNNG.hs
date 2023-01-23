@@ -200,22 +200,15 @@ checkNTForbidden ::
   Mode ->
   RNNGState ->
   Bool
-checkNTForbidden Mode{..} RNNGState {..} =
+checkNTForbidden _ RNNGState {..} =
   numOpenParen > 100 -- 開いているNTが多すぎる時
   || null textBuffer-- 単語が残っていない時
-  || if posMode 
-     then (previousAction /= SHIFT) && (previousAction /= REDUCE) && (previousAction /= ERROR) -- must SHIFT after NT
-     else False
-  where 
-    previousAction = if not (null textActionHistory)
-                      then head textActionHistory
-                      else ERROR
 
 checkREDUCEForbidden ::
   Mode ->
   RNNGState ->
   Bool
-checkREDUCEForbidden Mode{..} RNNGState {..} =
+checkREDUCEForbidden _ RNNGState {..} =
   length textStack < 2  -- first action must be NT and don't predict POS
   || (numOpenParen == 1 && not (null textBuffer)) -- bufferに単語が残ってるのに木を一つにまとめることはできない
   || ((previousAction /= SHIFT) && (previousAction /= REDUCE)) && (previousAction /= ERROR) -- can't REDUCE after NT
@@ -228,9 +221,16 @@ checkSHIFTForbidden ::
   Mode ->
   RNNGState ->
   Bool
-checkSHIFTForbidden _ RNNGState{..} =
+checkSHIFTForbidden Mode{..} RNNGState{..} =
   null textStack -- first action must be NT
   || null textBuffer -- Buffer isn't empty
+  || if posMode && not (null textStack)
+      then (previousAction /= SHIFT) && (previousAction /= REDUCE) && (previousAction /= ERROR) -- must SHIFT after NT
+      else False
+  where 
+    previousAction = if not (null textActionHistory)
+                      then head textActionHistory
+                      else ERROR
 
 maskTensor :: 
   Mode ->
@@ -318,7 +318,7 @@ parse Mode {..} (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT labe
       action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
   in RNNGState {
       stack = nt_embedding:stack,
-      textStack = ((T.pack "<") `T.append` label):textStack,
+      textStack = (T.pack "<" `T.append` label):textStack,
       hiddenStack = (stackLSTMForward stackLSTM hiddenStack nt_embedding):hiddenStack,
       buffer = buffer,
       textBuffer = textBuffer,

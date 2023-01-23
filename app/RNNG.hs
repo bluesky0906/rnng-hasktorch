@@ -35,10 +35,10 @@ aligned prediction answer =
   let predictionSize = length prediction
       answerSize = length answer
       alignedPrediction = if predictionSize < answerSize
-                          then prediction ++ (replicate (answerSize - predictionSize) ERROR)
+                          then prediction ++ replicate (answerSize - predictionSize) ERROR
                           else prediction
       alignedAnswer = if predictionSize > answerSize
-                        then answer ++ (replicate (predictionSize - answerSize) ERROR)
+                        then answer ++ replicate (predictionSize - answerSize) ERROR
                         else answer
   in (alignedPrediction, alignedAnswer)
 
@@ -133,7 +133,7 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
     step :: (Optimizer o) => RNNGSentence -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
     step rnngSentence@(RNNGSentence (_, actions)) (stepRNNG@(RNNG actionPredictRNNG parseRNNG compRNNG), (stepOpt1, stepOpt2, stepOpt3)) = do
       let answer = toDevice device $ asTensor $ fmap actionIndexFor actions
-          output = rnngForward mode stepRNNG IndexData {..}  rnngSentence
+          output = rnngForward mode stepRNNG IndexData {..} rnngSentence
       dropoutOutput <- forM output (dropout 0.2 True) 
       let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
       -- | パラメータ更新
@@ -167,7 +167,7 @@ evaluate mode@Mode{..} rnng IndexData {..} rnngSentences = do
           -- | lossの計算は答えと推論結果の系列長が同じ時だけ
           loss = if length prediction == length prediction
                   then nllLoss' answer (Torch.stack (Dim 0) output)
-                  else asTensor (0::Float) 
+                  else asTensor (0::Float)
       return (rnng', ((asValue loss::Float), prediction))
 
 
@@ -189,7 +189,6 @@ main = do
   validationData <- loadActionsFromBinary $ validationDataPathConfig config
   evaluationData <- loadActionsFromBinary $ evaluationDataPathConfig config
   let dataForTraining = trainingData
-  print $ head dataForTraining
   putStrLn $ "Training Data Size: " ++ show (length trainingData)
   putStrLn $ "Validation Data Size: " ++ show (length validationData)
   putStrLn $ "Evaluation Data Size: " ++ show (length evaluationData)
