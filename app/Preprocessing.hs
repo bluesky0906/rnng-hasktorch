@@ -20,13 +20,15 @@ import System.Directory (doesDirectoryExist, doesFileExist, listDirectory) --dir
 data PreprocessingOpt = PreprocessingOpt
   {
     path :: FilePath,
-    grammar :: Grammar
+    grammar :: Grammar,
+    pos :: Bool
   } deriving (Show)
 
 preprocess :: Parser PreprocessingOpt
 preprocess = PreprocessingOpt
   <$> strOption ( long "path" <> short 'p' <> help "path to WSJ" )
   <*> option auto ( long "grammar" <> short 'g' <> help "CFG or CCG" )
+  <*> option auto ( long "pos" <> help "include POS-tag or not" )
 
 opts :: ParserInfo PreprocessingOpt
 opts = info (preprocess <**> helper)
@@ -48,10 +50,11 @@ listFiles grammar p = do
 
 saveActionData ::
   Grammar ->
+  Bool ->
   [FilePath] -> 
   FilePath ->
   IO()
-saveActionData grammar dirsPath outputPath = do
+saveActionData grammar posMode dirsPath outputPath = do
   -- 指定されたディレクトリ以下のファイルを取得
   filePaths <- fmap concat $ traverse (listFiles grammar) dirsPath 
   --readmeは除外
@@ -59,13 +62,13 @@ saveActionData grammar dirsPath outputPath = do
   let trees = concat treess
       parsedTrees = filter (not . isErr) $ trees
   mapM_ print $ filter isErr $ trees
-  let rnngSentences = traverseTrees parsedTrees
+  let rnngSentences = traverseTrees posMode parsedTrees
   saveActionsToBinary outputPath rnngSentences
   -- content <- loadActionsFromBinary outputPath
   return ()
   where
     parseTreefile CFG = parseCFGfile
-    parseTreefile CCG = parseCCGfile
+    parseTreefile CCG = parseCCGfile posMode
 
 
 main :: IO()
@@ -74,10 +77,12 @@ main = do
   config <- configLoad
   let wsjDirPath = path options
       rnngGrammar = grammar options
+      posMode = pos options
       trainingDataDirs = fmap (wsjDirPath ++) ["02/", "03/", "04/", "05/", "06/", "07/", "08/", "09/", "10/", "11/", "12/", "13/", "14/", "15/", "16/", "17/", "18/", "19/", "20/", "21/"]
       validationDataDirs = fmap (wsjDirPath ++) ["24/"]
       evaluationDataDirs = fmap (wsjDirPath ++) ["23/"]
-  saveActionData rnngGrammar trainingDataDirs $ "data/training" ++ show rnngGrammar
-  saveActionData rnngGrammar evaluationDataDirs $ "data/evaluation" ++ show rnngGrammar
-  saveActionData rnngGrammar validationDataDirs $ "data/validation" ++ show rnngGrammar
+      posSuffix = if posMode then "POS" else ""
+  saveActionData rnngGrammar posMode trainingDataDirs $ "data/training" ++ show rnngGrammar ++ posSuffix
+  saveActionData rnngGrammar posMode evaluationDataDirs $ "data/evaluation" ++ show rnngGrammar ++ posSuffix
+  saveActionData rnngGrammar posMode validationDataDirs $ "data/validation" ++ show rnngGrammar ++ posSuffix
   return ()
