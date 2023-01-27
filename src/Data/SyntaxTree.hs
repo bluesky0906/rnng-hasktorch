@@ -46,11 +46,14 @@ fromRNNGSentence stack  (RNNGSentence (word:words, SHIFT:actions)) =
 fromRNNGSentence stack (RNNGSentence (words, (NT label):actions)) =
   fromRNNGSentence (Phrase (label, []):stack) (RNNGSentence (words, actions))
 fromRNNGSentence stack (RNNGSentence (words, REDUCE:actions)) =
-  fromRNNGSentence (reduce stack []) (RNNGSentence (words, actions))
+  case reduce stack [] of
+    Just newStack -> fromRNNGSentence newStack (RNNGSentence (words, actions))
+    Nothing -> Left "Invalid Tree"
   where
-    reduce :: [Tree] -> [Tree] -> [Tree]
-    reduce ((Phrase (label, [])):rest) lst = Phrase (label, lst):rest
+    reduce :: [Tree] -> [Tree] -> Maybe [Tree]
+    reduce ((Phrase (label, [])):rest) lst = Just (Phrase (label, lst):rest)
     reduce (tree:rest) lst = reduce rest (tree:lst)
+    reduce [] lst = Nothing
 fromRNNGSentence _ _  =
   Left "Invalid Tree"
 
