@@ -62,7 +62,7 @@ saveActionData grammar posMode dirsPath outputPath = do
   let trees = concat treess
       parsedTrees = filter (not . isErr) $ trees
   mapM_ print $ filter isErr $ trees
-  let rnngSentences = traverseTrees posMode parsedTrees
+  let rnngSentences = toRNNGSentences posMode parsedTrees
   saveActionsToBinary outputPath rnngSentences
   -- content <- loadActionsFromBinary outputPath
   return ()
