@@ -5,6 +5,7 @@
 module RNNG where
 import Model.RNNG
 import Data.RNNGSentence
+import Data.SyntaxTree
 import Util
 import Torch hiding (foldLoop, take, repeat)
 -- | hasktorch-tools

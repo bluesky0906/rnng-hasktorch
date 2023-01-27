@@ -27,12 +27,39 @@ isErr cfg = case cfg of
   Err _ _ -> True
 
 
+fromRNNGSentences :: [RNNGSentence] -> [Tree]
+fromRNNGSentences = fmap fromRNNGSentence'
+  where
+    fromRNNGSentence' :: RNNGSentence -> Tree
+    fromRNNGSentence' rnngSentence = 
+      case fromRNNGSentence [] rnngSentence of
+        Left e -> Err e (T.pack $ show rnngSentence)
+        Right tree -> tree
+
+fromRNNGSentence :: [Tree] -> RNNGSentence -> Either String Tree
+fromRNNGSentence stack (RNNGSentence ([], [])) =
+  if length stack == 1
+    then Right (head stack)
+    else Left "Invalid Tree"
+fromRNNGSentence stack  (RNNGSentence (word:words, SHIFT:actions)) =
+  fromRNNGSentence (Word word:stack) (RNNGSentence (words, actions))
+fromRNNGSentence stack (RNNGSentence (words, (NT label):actions)) =
+  fromRNNGSentence (Phrase (label, []):stack) (RNNGSentence (words, actions))
+fromRNNGSentence stack (RNNGSentence (words, REDUCE:actions)) =
+  fromRNNGSentence (reduce stack []) (RNNGSentence (words, actions))
+  where
+    reduce :: [Tree] -> [Tree] -> [Tree]
+    reduce ((Phrase (label, [])):rest) lst = Phrase (label, lst):rest
+    reduce (tree:rest) lst = reduce rest (tree:lst)
+fromRNNGSentence _ _  =
+  Left "Invalid Tree"
+
 toRNNGSentences :: Bool -> [Tree] -> [RNNGSentence]
 toRNNGSentences posMode = map (reverseRNNGSentence . toRNNGSentence posMode (RNNGSentence ([], [])))
 
 toRNNGSentence :: Bool -> RNNGSentence -> Tree -> RNNGSentence
 toRNNGSentence True (RNNGSentence (words, actions)) (Phrase (label, Word word:rest)) =
-  RNNGSentence (word:words, SHIFT:NT label:actions)
+  RNNGSentence (word:words, REDUCE:SHIFT:NT label:actions)
 -- POSタグは無視する
 toRNNGSentence False (RNNGSentence (words, actions)) (Phrase (_, Word word:rest)) =
   RNNGSentence (word:words, SHIFT:actions)
