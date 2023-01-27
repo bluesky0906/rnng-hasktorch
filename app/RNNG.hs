@@ -58,16 +58,6 @@ checkCorrect ((answer, prediction):rest)
   | answer == prediction = checkCorrect rest
   | otherwise            = False
 
-correctPredIdx ::
-  Int ->
-  [([Action], [Action])] ->
-  [Int]
-correctPredIdx _ [] = []
-correctPredIdx idx ((answer, prediction):rest) =
-  if checkCorrect (zip answer prediction) 
-    then idx:(correctPredIdx (idx + 1) rest)
-    else correctPredIdx (idx + 1) rest
-
 unknownActions ::
   (Action -> Int) ->
   [Action] ->
@@ -82,15 +72,41 @@ classificationReport predictions answers =
   let (alignedPredictions, alignedAnswers) = unzip $ map (\(prediction, answer) -> aligned prediction answer) (zip predictions answers)
   in showClassificationReport 20 $ zip (join alignedPredictions) (join alignedAnswers)
 
-resultReport ::
+filterByMask ::
+  [a] ->
+  [Bool] ->
+  [a]
+filterByMask lst mask = map fst $ filter snd (zip lst mask)
+
+showResults ::
   [(RNNGSentence, [Action])] ->
   String
-resultReport result = unlines $ flip map result \(RNNGSentence (words, actions), predition) ->
+showResults result = unlines $ flip map result \(RNNGSentence (words, actions), predition) ->
   unlines [
       "----------------------------------",
       "Sentence: " ++ show words,
       "Actions:    " ++ show actions,
       "Prediction: " ++ show predition
+    ]
+
+reportResult ::
+  -- | validな木かどうか
+  Bool ->
+  -- | 答えが合っているかどうか
+  Bool ->
+  -- | 正解
+  RNNGSentence ->
+  -- | 予測
+  [Action] ->
+  String
+reportResult isValid isCorrect (RNNGSentence (words, actions)) prediction = 
+  unlines [
+      "----------------------------------",
+      "Sentence:         " ++ show words,
+      "Actions:          " ++ show actions,
+      "Prediction:       " ++ show prediction,
+      "Valid or Invalid: " ++ if isValid then "Valid" else "Invalid",
+      "Right or Wrong:   " ++ if isCorrect then "Right" else "Wrong"
     ]
 
 
@@ -128,7 +144,7 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
 
       (validationLoss, validationPrediction) <- evaluate mode batchRNNG' IndexData {..}  validationData
       putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
-      sampleRandomData 5 (zip validationData validationPrediction) >>= putStr . resultReport
+      sampleRandomData 5 (zip validationData validationPrediction) >>= putStr . showResults
       putStrLn "======================================"
       return ((batchRNNG', batchOpts'), validationLoss)
     step :: (Optimizer o) => RNNGSentence -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
@@ -238,12 +254,12 @@ main = do
                       "Point" -> Point
                       "All" -> All
 
-  rnngSpec <- (B.decodeFile modelSpecPath)::(IO RNNGSpec)
+  rnngSpec <- B.decodeFile modelSpecPath::(IO RNNGSpec)
   rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
 
   -- | training dataにないactionとその頻度
-  putStrLn $ "Unknown Actions and their frequency: "
+  putStrLn "Unknown Actions and their frequency: "
   print $ counts $ unknownActions actionIndexFor $ toActionList evaluationData
   
   -- | trainingデータの低頻度ラベル
@@ -257,12 +273,22 @@ main = do
                   }
   (_, evaluationPrediction) <- evaluate mode rnngModel indexData evaluationData
 
+  -- | ちゃんと木になってる予測を抜き出してくる
+  let predictedRNNGSentences = zipWith (curry insertDifferentActions) evaluationData evaluationPrediction
+      predictionTrees = fromRNNGSentences predictedRNNGSentences
+      validTreeMask = map (not . isErr) predictionTrees
+  putStr "Num of Valid Trees: "
+  print $ length $ filterByMask predictionTrees validTreeMask
+
   -- | 全て正解の文を抜き出してくる
-  let correctIdxes = correctPredIdx 0 (zip answers evaluationPrediction)
-  print $ map (evaluationData !!) correctIdxes 
-  print correctIdxes
+  let correctAnswerMask = zipWith ((checkCorrect .) . zip) answers evaluationPrediction
+      correctAnswers = filterByMask evaluationData correctAnswerMask
+  putStr "Num of Correct Answers: "
+  print $ length correctAnswers
+  putStrLn "Correct Answers: "
+  print correctAnswers
 
   -- | 分析結果を出力
-  writeFile ("reports/" ++ modelName ++ "-result.txt") $ resultReport (zip evaluationData evaluationPrediction)
+  writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask evaluationData evaluationPrediction
   T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers
-  -- sampleRandomData 10 (zip evaluationData evaluationPrediction) >>= resultReport
+  -- sampleR  andomData 10 (zip evaluationData evaluationPrediction) >>= showResults
