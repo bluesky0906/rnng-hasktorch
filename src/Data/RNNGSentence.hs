@@ -38,6 +38,9 @@ instance Store RNNGSentence
 instance A.FromJSON RNNGSentence
 instance A.ToJSON RNNGSentence
 
+insertDifferentActions :: (RNNGSentence, [Action]) -> RNNGSentence
+insertDifferentActions (RNNGSentence (words, _), prediction) = RNNGSentence (words, prediction)
+
 reverseRNNGSentence :: RNNGSentence -> RNNGSentence
 reverseRNNGSentence (RNNGSentence (words, actions)) = RNNGSentence ((reverse words), (reverse actions))
 

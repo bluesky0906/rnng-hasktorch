@@ -203,7 +203,9 @@ checkNTForbidden ::
 checkNTForbidden Mode{..} RNNGState {..} =
   numOpenParen > 100 -- 開いているNTが多すぎる時
   || null textBuffer-- 単語が残っていない時
-  || not (null textActionHistory) && (head textActionHistory == SHIFT) -- 1番初めではなくて、前のアクションがSHIFTの時
+  || if posMode 
+      then not (null textActionHistory) && (head textActionHistory == SHIFT) -- 1番初めではなくて、前のアクションがSHIFTの時
+      else False
 
 checkREDUCEForbidden ::
   Mode ->
@@ -226,7 +228,7 @@ checkSHIFTForbidden Mode{..} RNNGState{..} =
   null textStack -- first action must be NT
   || null textBuffer -- Buffer isn't empty
   || if posMode && not (null textStack)
-      then (previousAction /= SHIFT) && (previousAction /= REDUCE) && (previousAction /= ERROR) -- must SHIFT after NT
+      then (previousAction == SHIFT) || (previousAction == REDUCE) || (previousAction == ERROR) -- SHIFT only after NT
       else False
   where 
     previousAction = if not (null textActionHistory)
