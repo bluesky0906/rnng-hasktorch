@@ -64,12 +64,15 @@ unknownActions ::
   [Action]
 unknownActions actionIndexFor [] = []
 unknownActions actionIndexFor (action:rest)
-  | actionIndexFor action == 0 = action:(unknownActions actionIndexFor rest)
+  | actionIndexFor action == 0 = action:unknownActions actionIndexFor rest
   | otherwise                  = unknownActions actionIndexFor rest
 
-classificationReport :: [[Action]] -> [[Action]] -> T.Text
+classificationReport :: 
+  [[Action]] ->
+  [[Action]] -> 
+  T.Text
 classificationReport predictions answers =
-  let (alignedPredictions, alignedAnswers) = unzip $ map (\(prediction, answer) -> aligned prediction answer) (zip predictions answers)
+  let (alignedPredictions, alignedAnswers) = unzip $ zipWith aligned predictions answers
   in showClassificationReport 20 $ zip (join alignedPredictions) (join alignedAnswers)
 
 filterByMask ::
@@ -78,10 +81,11 @@ filterByMask ::
   [a]
 filterByMask lst mask = map fst $ filter snd (zip lst mask)
 
-showResults ::
-  [(RNNGSentence, [Action])] ->
+showResult ::
+  RNNGSentence ->
+  [Action] ->
   String
-showResults result = unlines $ flip map result \(RNNGSentence (words, actions), predition) ->
+showResult (RNNGSentence (words, actions)) predition = 
   unlines [
       "----------------------------------",
       "Sentence: " ++ show words,
@@ -144,7 +148,8 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
 
       (validationLoss, validationPrediction) <- evaluate mode batchRNNG' IndexData {..}  validationData
       putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
-      sampleRandomData 5 (zip validationData validationPrediction) >>= putStr . showResults
+      sampledData <- sampleRandomData 5 (zip validationData validationPrediction)
+      putStr $ unlines $ map (uncurry showResult) sampledData
       putStrLn "======================================"
       return ((batchRNNG', batchOpts'), validationLoss)
     step :: (Optimizer o) => RNNGSentence -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
@@ -185,7 +190,7 @@ evaluate mode@Mode{..} rnng IndexData {..} rnngSentences = do
           loss = if length prediction == length prediction
                   then nllLoss' answer (Torch.stack (Dim 0) output)
                   else asTensor (0::Float)
-      return (rnng', ((asValue loss::Float), prediction))
+      return (rnng', (asValue loss::Float, prediction))
 
 
 main :: IO()
@@ -291,4 +296,3 @@ main = do
   -- | 分析結果を出力
   writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask evaluationData evaluationPrediction
   T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers
-  -- sampleR  andomData 10 (zip evaluationData evaluationPrediction) >>= showResults
