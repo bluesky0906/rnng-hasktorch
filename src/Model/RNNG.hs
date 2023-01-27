@@ -200,9 +200,10 @@ checkNTForbidden ::
   Mode ->
   RNNGState ->
   Bool
-checkNTForbidden _ RNNGState {..} =
+checkNTForbidden Mode{..} RNNGState {..} =
   numOpenParen > 100 -- 開いているNTが多すぎる時
   || null textBuffer-- 単語が残っていない時
+  || not (null textActionHistory) && (head textActionHistory == SHIFT) -- 1番初めではなくて、前のアクションがSHIFTの時
 
 checkREDUCEForbidden ::
   Mode ->
