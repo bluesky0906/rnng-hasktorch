@@ -19,6 +19,7 @@ import qualified Data.Text as T    --text
 import qualified Data.Binary as B
 import Data.List
 import Data.Functor
+import System.Directory (createDirectory)
 import Debug.Trace
 import Control.Monad
 
@@ -26,7 +27,8 @@ import Control.Monad
 data TrainingConfig = TrainingConfig {
   iter :: Int, -- epoch数
   validationStep :: Int,
-  learningRate :: LearningRate
+  learningRate :: LearningRate,
+  modelName :: String
 }
 
 
@@ -130,12 +132,19 @@ training ::
   ([RNNGSentence], [RNNGSentence]) ->
   IO (RNNG, [[Float]])
 training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, validationData) = do
+  createDirectory checkpointDirectory
   ((trained, _), losses) <- mapAccumM [1..iter] (rnng, (optim, optim, optim)) epochStep
   return (trained, losses)
   where
+    checkpointDirectory = "models/" ++ modelName ++ "-checkpoints"
     batches = makeBatch validationStep trainingData
     epochStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), [Float])
-    epochStep epoch model = mapAccumM [1..(length batches)] model batchStep
+    epochStep epoch model = do
+      trained@((trainedModel, _), losses) <- mapAccumM [1..(length batches)] model batchStep
+      -- | 1stepごとにcheckpointとしてモデル保存
+      -- | TODO::　optimizerも保存
+      Torch.Train.saveParams trainedModel (checkpointDirectory ++ "/epoch-" ++ show epoch)
+      return trained
     -- | TODO:: Batch処理にする
     batchStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
     batchStep idx (batchRNNG, batchOpts) = do
@@ -237,12 +246,16 @@ main = do
         device = Device CUDA 0
         rnngSpec = RNNGSpec device posMode wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
     initRNNGModel <- toDevice device <$> sample rnngSpec
+    -- | spec保存
+    B.encodeFile modelSpecPath rnngSpec
+
 
     -- | training
     let trainingConfig = TrainingConfig {
                            iter = fromIntegral (epochConfig config)::Int,
                            learningRate = toDevice device $ asTensor (learningRateConfig config),
-                           validationStep = fromIntegral (validationStepConfig config)::Int
+                           validationStep = fromIntegral (validationStepConfig config)::Int,
+                           modelName = modelName
                          }
         optim = GD
         mode = Mode {
@@ -254,7 +267,6 @@ main = do
 
     -- | model保存
     Torch.Train.saveParams trained modelFilePath
-    B.encodeFile modelSpecPath rnngSpec
     drawLearningCurve ("imgs/" ++ modelName ++ ".png") "Learning Curve" [("", reverse $ concat losses)]
 
   let parsingMode = case parsingModeConfig config of 
