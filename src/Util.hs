@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Util where
 import qualified Data.Text as T  
@@ -97,6 +98,33 @@ for Config file
 
 -}
 
+data DataType = Train | Eval | Valid 
+
+dataFilePath ::
+  -- | grammar
+  String ->
+  -- | pos mode
+  Bool ->
+  -- | train, eval, valid
+  (String, String, String)
+dataFilePath grammar posMode = 
+  ("data/traininig" ++ suffix, "data/eval" ++ suffix, "data/valid" ++ suffix)
+  where
+    suffix = grammar ++ if posMode then "POS" else ""
+
+modelNameConfig ::
+  Config ->
+  String
+modelNameConfig Config{..} =
+  "rnng-" ++ grammarModeConfig ++
+  pos ++ 
+  "-epoch" ++  show epochConfig ++
+  "-layer" ++ show numOfLayerConfig ++
+  "-hidden" ++ show hiddenSizeConfig ++
+  "-lr" ++ show learningRateConfig
+  where
+    pos = if posModeConfig then "-pos" else ""
+
 getProjectRoot :: IO String
 getProjectRoot = do
   projectRoot <- getProjectRootWeightedCurrent
@@ -109,17 +137,14 @@ data Config = Config {
   modeConfig :: String, 
   parsingModeConfig :: String,
   posModeConfig :: Bool,
-  trainingDataPathConfig :: String,
-  validationDataPathConfig :: String,
-  evaluationDataPathConfig :: String,
+  grammarModeConfig :: String,
   epochConfig :: Natural,
   validationStepConfig :: Natural,
   actionEmbedSizeConfig :: Natural,
   wordEmbedSizeConfig :: Natural,
   hiddenSizeConfig :: Natural,
   numOfLayerConfig :: Natural,
-  learningRateConfig :: Double,
-  modelNameConfig :: String
+  learningRateConfig :: Double
   } deriving (Generic, Show)
 
 instance FromDhall Config

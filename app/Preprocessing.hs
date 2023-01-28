@@ -3,7 +3,7 @@ import Data.SyntaxTree
 import Data.CFG
 import Data.CCG
 import Data.RNNGSentence
-import Util (configLoad, Config(..))
+import Util (dataFilePath)
 import Options.Applicative
 import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
@@ -81,8 +81,8 @@ main = do
       trainingDataDirs = fmap (wsjDirPath ++) ["02/", "03/", "04/", "05/", "06/", "07/", "08/", "09/", "10/", "11/", "12/", "13/", "14/", "15/", "16/", "17/", "18/", "19/", "20/", "21/"]
       validationDataDirs = fmap (wsjDirPath ++) ["24/"]
       evaluationDataDirs = fmap (wsjDirPath ++) ["23/"]
-      posSuffix = if posMode then "POS" else ""
-  saveActionData rnngGrammar posMode trainingDataDirs $ "data/training" ++ show rnngGrammar ++ posSuffix
-  saveActionData rnngGrammar posMode evaluationDataDirs $ "data/evaluation" ++ show rnngGrammar ++ posSuffix
-  saveActionData rnngGrammar posMode validationDataDirs $ "data/validation" ++ show rnngGrammar ++ posSuffix
+      (trainDataPath, evalDataPath, validDataPath) = dataFilePath (show rnngGrammar) posMode
+  saveActionData rnngGrammar posMode trainingDataDirs trainDataPath
+  saveActionData rnngGrammar posMode evaluationDataDirs evalDataPath
+  saveActionData rnngGrammar posMode validationDataDirs validDataPath
   return ()

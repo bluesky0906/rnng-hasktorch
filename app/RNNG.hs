@@ -7,7 +7,7 @@ import Model.RNNG
 import Data.RNNGSentence
 import Data.SyntaxTree
 import Util
-import Torch hiding (foldLoop, take, repeat)
+import Torch hiding (foldLoop, take, repeat, RuntimeMode)
 -- | hasktorch-tools
 import Torch.Control (mapAccumM, makeBatch)
 import Torch.Train (update, saveParams, loadParams)
@@ -202,14 +202,16 @@ main = do
   putStrLn "======================================"
   let mode = modeConfig config
       posMode = posModeConfig config
+      grammarMode = grammarModeConfig config
       modelName = modelNameConfig config
       modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
+      (trainDataPath, evalDataPath, validDataPath) = dataFilePath igrammarMode posMode
 
   -- data
-  trainingData <- loadActionsFromBinary $ trainingDataPathConfig config
-  validationData <- loadActionsFromBinary $ validationDataPathConfig config
-  evaluationData <- loadActionsFromBinary $ evaluationDataPathConfig config
+  trainingData <- loadActionsFromBinary trainDataPath
+  validationData <- loadActionsFromBinary validDataPath
+  evaluationData <- loadActionsFromBinary evalDataPath
   let dataForTraining = trainingData
   putStrLn $ "Training Data Size: " ++ show (length trainingData)
   putStrLn $ "Validation Data Size: " ++ show (length validationData)
