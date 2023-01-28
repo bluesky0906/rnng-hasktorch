@@ -157,7 +157,9 @@ data Config = Config {
   wordEmbedSizeConfig :: Natural,
   hiddenSizeConfig :: Natural,
   numOfLayerConfig :: Natural,
-  learningRateConfig :: Double
+  learningRateConfig :: Double,
+  modelFilePathConfig :: String,
+  specFilePathConfig :: String
   } deriving (Generic, Show)
 
 instance FromDhall Config

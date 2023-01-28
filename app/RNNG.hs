@@ -268,12 +268,19 @@ main = do
     Torch.Train.saveParams trained modelFilePath
     drawLearningCurve ("imgs/" ++ modelName ++ ".png") "Learning Curve" [("", reverse $ concat losses)]
 
+
+  {-
+
+    evaluation
+
+  -}
   let parsingMode = case parsingModeConfig config of 
                       "Point" -> Point
                       "All" -> All
 
-  rnngSpec <- B.decodeFile modelSpecPath::(IO RNNGSpec)
-  rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
+  -- | model読み込み
+  rnngSpec <- B.decodeFile (if mode == "Eval" then specFilePathConfig config else modelSpecPath)::(IO RNNGSpec)
+  rnngModel <- Torch.Train.loadParams rnngSpec (if mode == "Eval" then modelFilePathConfig config else modelFilePath)
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
 
   -- | training dataにないactionとその頻度
