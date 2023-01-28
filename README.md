@@ -33,17 +33,19 @@ The experiment is configured in `config.dhall`. If you want to change the config
 | ---- | ---- |
 |  modeConfig  |　Choose `Train` or `Eval` mode |
 |  **parsingModeConfig | Parsing mode during `Eval` mode <br>　`Point`: Use correct data for prediction results before each time step <br>　`All`　: All actions are predicted by the learned model|
-|  trainingDataPathConfig | Training data created in `Preprocessing`  |
-|  validationDataPathConfig | Validation data created in `Preprocessing`  |
-|  evaliationDataPathConfig | Evaliation data created in `Preprocessing`  |
-|  actionEmbedSizeConfig | Size ofAction embedding  |
-|  wordEmbedSizeConfig | Size of word embedding  |
-|  hiddenSizeConfig | Size of hidden Layer |
-|  numOfLayerConfig | Number of LSTM  layer |
-|  learningRateConfig | Learning late during `Train` mode |
+|  grammarModeConfig | Choose `CCG` or `CFG`  |
+|  *epochConfig | Number of epoch  |
+|  *actionEmbedSizeConfig | Size ofAction embedding  |
+|  *wordEmbedSizeConfig | Size of word embedding  |
+|  *hiddenSizeConfig | Size of hidden Layer |
+|  *numOfLayerConfig | Number of LSTM  layer |
+|  *learningRateConfig | Learning late during `Train` mode |
 |  *epochConfig  | Number of epoch during training |
 |  *validationStepConfig  | How many steps to validate every during `Train` mode |
-|  *modelNameConfig  | Name of model (to be saved during `Train` mode \| to be loaded during `Eval` mode) |
+|  **modeFilePathConfig  | Path of model to be loaded during `Eval` mode |
+|  **specFilePathConfig  | Path of spec file to be loaded during `Eval` mode |
+
+Model Name is defined by experiment setting during `Train`.
 
 <div style="text-align: right;">
 
