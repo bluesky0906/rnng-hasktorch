@@ -109,7 +109,7 @@ dataFilePath ::
   -- | train, eval, valid
   (String, String, String)
 dataFilePath grammar posMode = 
-  ("data/traininig" ++ suffix, "data/eval" ++ suffix, "data/valid" ++ suffix)
+  ("data/training" ++ suffix, "data/evaluation" ++ suffix, "data/validation" ++ suffix)
   where
     suffix = grammar ++ if posMode then "POS" else ""
 

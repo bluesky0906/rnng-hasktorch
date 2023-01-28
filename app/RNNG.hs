@@ -249,7 +249,6 @@ main = do
     -- | spec保存
     B.encodeFile modelSpecPath rnngSpec
 
-
     -- | training
     let trainingConfig = TrainingConfig {
                            iter = fromIntegral (epochConfig config)::Int,
