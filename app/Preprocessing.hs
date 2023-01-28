@@ -74,7 +74,6 @@ saveActionData grammar posMode dirsPath outputPath = do
 main :: IO()
 main = do
   options <- execParser opts
-  config <- configLoad
   let wsjDirPath = path options
       rnngGrammar = grammar options
       posMode = pos options

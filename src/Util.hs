@@ -8,6 +8,7 @@ import qualified Data.Map.Strict as M
 import Data.List.Split (chunksOf, splitEvery) --split
 import Data.List as L
 import Data.Ord
+import System.Directory (doesFileExist)
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
 import System.Random
 import Dhall hiding ( map )
@@ -113,17 +114,29 @@ dataFilePath grammar posMode =
     suffix = grammar ++ if posMode then "POS" else ""
 
 modelNameConfig ::
+  -- | overwrite
+  Bool ->
   Config ->
-  String
-modelNameConfig Config{..} =
-  "rnng-" ++ grammarModeConfig ++
-  pos ++
-  "-layer" ++ show numOfLayerConfig ++
-  "-hidden" ++ show hiddenSizeConfig ++
-  "-epoch" ++  show epochConfig ++
-  "-lr" ++ show learningRateConfig
+  IO FilePath
+modelNameConfig overwrite Config{..} = do
+  let pos = if posModeConfig then "-pos" else ""
+      modelName = "rnng-" ++ grammarModeConfig ++
+                  pos ++
+                  "-layer" ++ show numOfLayerConfig ++
+                  "-hidden" ++ show hiddenSizeConfig ++
+                  "-epoch" ++  show epochConfig ++
+                  "-lr" ++ show learningRateConfig
+  if overwrite 
+    then return modelName
+    else findNonExistentModelName 1 modelName
   where
-    pos = if posModeConfig then "-pos" else ""
+    findNonExistentModelName :: Int -> FilePath -> IO FilePath
+    findNonExistentModelName idx modelName = do
+      let newModelName = if idx == 1 then modelName else modelName ++ "-" ++ show idx
+      exist <- doesFileExist newModelName
+      if exist 
+        then findNonExistentModelName (idx + 1) modelName
+        else return newModelName
 
 getProjectRoot :: IO String
 getProjectRoot = do

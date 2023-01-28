@@ -203,10 +203,10 @@ main = do
   let mode = modeConfig config
       posMode = posModeConfig config
       grammarMode = grammarModeConfig config
-      modelName = modelNameConfig config
-      modelFilePath = "models/" ++ modelName
+  modelName <- modelNameConfig True config
+  let modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
-      (trainDataPath, evalDataPath, validDataPath) = dataFilePath igrammarMode posMode
+      (trainDataPath, evalDataPath, validDataPath) = dataFilePath grammarMode posMode
 
   -- data
   trainingData <- loadActionsFromBinary trainDataPath
