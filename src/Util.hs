@@ -117,10 +117,10 @@ modelNameConfig ::
   String
 modelNameConfig Config{..} =
   "rnng-" ++ grammarModeConfig ++
-  pos ++ 
-  "-epoch" ++  show epochConfig ++
+  pos ++
   "-layer" ++ show numOfLayerConfig ++
   "-hidden" ++ show hiddenSizeConfig ++
+  "-epoch" ++  show epochConfig ++
   "-lr" ++ show learningRateConfig
   where
     pos = if posModeConfig then "-pos" else ""
