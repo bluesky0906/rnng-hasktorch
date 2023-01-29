@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Util where
 import qualified Data.Text as T  
@@ -7,6 +8,7 @@ import qualified Data.Map.Strict as M
 import Data.List.Split (chunksOf, splitEvery) --split
 import Data.List as L
 import Data.Ord
+import System.Directory (doesFileExist)
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
 import System.Random
 import Dhall hiding ( map )
@@ -97,6 +99,45 @@ for Config file
 
 -}
 
+data DataType = Train | Eval | Valid 
+
+dataFilePath ::
+  -- | grammar
+  String ->
+  -- | pos mode
+  Bool ->
+  -- | train, eval, valid
+  (String, String, String)
+dataFilePath grammar posMode = 
+  ("data/training" ++ suffix, "data/evaluation" ++ suffix, "data/validation" ++ suffix)
+  where
+    suffix = grammar ++ if posMode then "POS" else ""
+
+modelNameConfig ::
+  -- | overwrite
+  Bool ->
+  Config ->
+  IO FilePath
+modelNameConfig overwrite Config{..} = do
+  let pos = if posModeConfig then "-pos" else ""
+      modelName = "rnng-" ++ grammarModeConfig ++
+                  pos ++
+                  "-layer" ++ show numOfLayerConfig ++
+                  "-hidden" ++ show hiddenSizeConfig ++
+                  "-epoch" ++  show epochConfig ++
+                  "-lr" ++ show learningRateConfig
+  if overwrite 
+    then return modelName
+    else findNonExistentModelName 1 modelName
+  where
+    findNonExistentModelName :: Int -> FilePath -> IO FilePath
+    findNonExistentModelName idx modelName = do
+      let newModelName = if idx == 1 then modelName else modelName ++ "-" ++ show idx
+      exist <- doesFileExist newModelName
+      if exist 
+        then findNonExistentModelName (idx + 1) modelName
+        else return newModelName
+
 getProjectRoot :: IO String
 getProjectRoot = do
   projectRoot <- getProjectRootWeightedCurrent
@@ -109,9 +150,7 @@ data Config = Config {
   modeConfig :: String, 
   parsingModeConfig :: String,
   posModeConfig :: Bool,
-  trainingDataPathConfig :: String,
-  validationDataPathConfig :: String,
-  evaluationDataPathConfig :: String,
+  grammarModeConfig :: String,
   epochConfig :: Natural,
   validationStepConfig :: Natural,
   actionEmbedSizeConfig :: Natural,
@@ -119,7 +158,8 @@ data Config = Config {
   hiddenSizeConfig :: Natural,
   numOfLayerConfig :: Natural,
   learningRateConfig :: Double,
-  modelNameConfig :: String
+  modelFilePathConfig :: String,
+  specFilePathConfig :: String
   } deriving (Generic, Show)
 
 instance FromDhall Config

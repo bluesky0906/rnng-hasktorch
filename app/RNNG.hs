@@ -7,7 +7,7 @@ import Model.RNNG
 import Data.RNNGSentence
 import Data.SyntaxTree
 import Util
-import Torch hiding (foldLoop, take, repeat)
+import Torch hiding (foldLoop, take, repeat, RuntimeMode)
 -- | hasktorch-tools
 import Torch.Control (mapAccumM, makeBatch)
 import Torch.Train (update, saveParams, loadParams)
@@ -19,6 +19,7 @@ import qualified Data.Text as T    --text
 import qualified Data.Binary as B
 import Data.List
 import Data.Functor
+import System.Directory (createDirectory)
 import Debug.Trace
 import Control.Monad
 
@@ -26,7 +27,8 @@ import Control.Monad
 data TrainingConfig = TrainingConfig {
   iter :: Int, -- epoch数
   validationStep :: Int,
-  learningRate :: LearningRate
+  learningRate :: LearningRate,
+  modelName :: String
 }
 
 
@@ -64,12 +66,15 @@ unknownActions ::
   [Action]
 unknownActions actionIndexFor [] = []
 unknownActions actionIndexFor (action:rest)
-  | actionIndexFor action == 0 = action:(unknownActions actionIndexFor rest)
+  | actionIndexFor action == 0 = action:unknownActions actionIndexFor rest
   | otherwise                  = unknownActions actionIndexFor rest
 
-classificationReport :: [[Action]] -> [[Action]] -> T.Text
+classificationReport :: 
+  [[Action]] ->
+  [[Action]] -> 
+  T.Text
 classificationReport predictions answers =
-  let (alignedPredictions, alignedAnswers) = unzip $ map (\(prediction, answer) -> aligned prediction answer) (zip predictions answers)
+  let (alignedPredictions, alignedAnswers) = unzip $ zipWith aligned predictions answers
   in showClassificationReport 20 $ zip (join alignedPredictions) (join alignedAnswers)
 
 filterByMask ::
@@ -78,10 +83,11 @@ filterByMask ::
   [a]
 filterByMask lst mask = map fst $ filter snd (zip lst mask)
 
-showResults ::
-  [(RNNGSentence, [Action])] ->
+showResult ::
+  RNNGSentence ->
+  [Action] ->
   String
-showResults result = unlines $ flip map result \(RNNGSentence (words, actions), predition) ->
+showResult (RNNGSentence (words, actions)) predition = 
   unlines [
       "----------------------------------",
       "Sentence: " ++ show words,
@@ -126,12 +132,19 @@ training ::
   ([RNNGSentence], [RNNGSentence]) ->
   IO (RNNG, [[Float]])
 training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, validationData) = do
+  createDirectory checkpointDirectory
   ((trained, _), losses) <- mapAccumM [1..iter] (rnng, (optim, optim, optim)) epochStep
   return (trained, losses)
   where
+    checkpointDirectory = "models/" ++ modelName ++ "-checkpoints"
     batches = makeBatch validationStep trainingData
     epochStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), [Float])
-    epochStep epoch model = mapAccumM [1..(length batches)] model batchStep
+    epochStep epoch model = do
+      trained@((trainedModel, _), losses) <- mapAccumM [1..(length batches)] model batchStep
+      -- | 1stepごとにcheckpointとしてモデル保存
+      -- | TODO::　optimizerも保存
+      Torch.Train.saveParams trainedModel (checkpointDirectory ++ "/epoch-" ++ show epoch)
+      return trained
     -- | TODO:: Batch処理にする
     batchStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
     batchStep idx (batchRNNG, batchOpts) = do
@@ -144,7 +157,8 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
 
       (validationLoss, validationPrediction) <- evaluate mode batchRNNG' IndexData {..}  validationData
       putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
-      sampleRandomData 5 (zip validationData validationPrediction) >>= putStr . showResults
+      sampledData <- sampleRandomData 5 (zip validationData validationPrediction)
+      putStr $ unlines $ map (uncurry showResult) sampledData
       putStrLn "======================================"
       return ((batchRNNG', batchOpts'), validationLoss)
     step :: (Optimizer o) => RNNGSentence -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
@@ -185,7 +199,7 @@ evaluate mode@Mode{..} rnng IndexData {..} rnngSentences = do
           loss = if length prediction == length prediction
                   then nllLoss' answer (Torch.stack (Dim 0) output)
                   else asTensor (0::Float)
-      return (rnng', ((asValue loss::Float), prediction))
+      return (rnng', (asValue loss::Float, prediction))
 
 
 main :: IO()
@@ -197,14 +211,16 @@ main = do
   putStrLn "======================================"
   let mode = modeConfig config
       posMode = posModeConfig config
-      modelName = modelNameConfig config
-      modelFilePath = "models/" ++ modelName
+      grammarMode = grammarModeConfig config
+  modelName <- modelNameConfig True config
+  let modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
+      (trainDataPath, evalDataPath, validDataPath) = dataFilePath grammarMode posMode
 
   -- data
-  trainingData <- loadActionsFromBinary $ trainingDataPathConfig config
-  validationData <- loadActionsFromBinary $ validationDataPathConfig config
-  evaluationData <- loadActionsFromBinary $ evaluationDataPathConfig config
+  trainingData <- loadActionsFromBinary trainDataPath
+  validationData <- loadActionsFromBinary validDataPath
+  evaluationData <- loadActionsFromBinary evalDataPath
   let dataForTraining = trainingData
   putStrLn $ "Training Data Size: " ++ show (length trainingData)
   putStrLn $ "Validation Data Size: " ++ show (length validationData)
@@ -230,12 +246,15 @@ main = do
         device = Device CUDA 0
         rnngSpec = RNNGSpec device posMode wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
     initRNNGModel <- toDevice device <$> sample rnngSpec
+    -- | spec保存
+    B.encodeFile modelSpecPath rnngSpec
 
     -- | training
     let trainingConfig = TrainingConfig {
                            iter = fromIntegral (epochConfig config)::Int,
                            learningRate = toDevice device $ asTensor (learningRateConfig config),
-                           validationStep = fromIntegral (validationStepConfig config)::Int
+                           validationStep = fromIntegral (validationStepConfig config)::Int,
+                           modelName = modelName
                          }
         optim = GD
         mode = Mode {
@@ -247,15 +266,21 @@ main = do
 
     -- | model保存
     Torch.Train.saveParams trained modelFilePath
-    B.encodeFile modelSpecPath rnngSpec
     drawLearningCurve ("imgs/" ++ modelName ++ ".png") "Learning Curve" [("", reverse $ concat losses)]
 
+
+  {-
+
+    evaluation
+
+  -}
   let parsingMode = case parsingModeConfig config of 
                       "Point" -> Point
                       "All" -> All
 
-  rnngSpec <- B.decodeFile modelSpecPath::(IO RNNGSpec)
-  rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
+  -- | model読み込み
+  rnngSpec <- B.decodeFile (if mode == "Eval" then specFilePathConfig config else modelSpecPath)::(IO RNNGSpec)
+  rnngModel <- Torch.Train.loadParams rnngSpec (if mode == "Eval" then modelFilePathConfig config else modelFilePath)
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
 
   -- | training dataにないactionとその頻度
@@ -291,4 +316,3 @@ main = do
   -- | 分析結果を出力
   writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask evaluationData evaluationPrediction
   T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers
-  -- sampleR  andomData 10 (zip evaluationData evaluationPrediction) >>= showResults
