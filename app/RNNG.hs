@@ -19,7 +19,7 @@ import qualified Data.Text as T    --text
 import qualified Data.Binary as B
 import Data.List
 import Data.Functor
-import System.Directory (createDirectory)
+import System.Directory (createDirectory, doesDirectoryExist)
 import Debug.Trace
 import Control.Monad
 
@@ -101,20 +101,23 @@ reportResult ::
   -- | 答えが合っているかどうか
   Bool ->
   -- | 正解
-  RNNGSentence ->
+  (RNNGSentence, Tree) ->
   -- | 予測
-  [Action] ->
+  ([Action], Tree) ->
   String
-reportResult isValid isCorrect (RNNGSentence (words, actions)) prediction = 
-  unlines [
+reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (prediction, predictedTree) = 
+  unlines $ [
       "----------------------------------",
       "Sentence:         " ++ show words,
       "Actions:          " ++ show actions,
       "Prediction:       " ++ show prediction,
       "Valid or Invalid: " ++ if isValid then "Valid" else "Invalid",
       "Right or Wrong:   " ++ if isCorrect then "Right" else "Wrong"
+    ] ++ [
+      "Correct tree:\n" ++ show correctTree | isValid
+    ] ++ [
+      "predictedTree:\n" ++ show predictedTree | not isCorrect
     ]
-
 
 {-
 
@@ -132,7 +135,8 @@ training ::
   ([RNNGSentence], [RNNGSentence]) ->
   IO (RNNG, [[Float]])
 training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, validationData) = do
-  createDirectory checkpointDirectory
+  existCheckpointDir <- doesDirectoryExist checkpointDirectory 
+  unless existCheckpointDir $ createDirectory checkpointDirectory
   ((trained, _), losses) <- mapAccumM [1..iter] (rnng, (optim, optim, optim)) epochStep
   return (trained, losses)
   where
@@ -279,8 +283,8 @@ main = do
                       "All" -> All
 
   -- | model読み込み
-  rnngSpec <- B.decodeFile (if mode == "Eval" then specFilePathConfig config else modelSpecPath)::(IO RNNGSpec)
-  rnngModel <- Torch.Train.loadParams rnngSpec (if mode == "Eval" then modelFilePathConfig config else modelFilePath)
+  rnngSpec <- B.decodeFile modelSpecPath::(IO RNNGSpec)
+  rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
 
   -- | training dataにないactionとその頻度
@@ -301,6 +305,7 @@ main = do
   -- | ちゃんと木になってる予測を抜き出してくる
   let predictedRNNGSentences = zipWith (curry insertDifferentActions) evaluationData evaluationPrediction
       predictionTrees = fromRNNGSentences predictedRNNGSentences
+      correctTrees = fromRNNGSentences evaluationData
       validTreeMask = map (not . isErr) predictionTrees
   putStr "Num of Valid Trees: "
   print $ length $ filterByMask predictionTrees validTreeMask
@@ -314,5 +319,5 @@ main = do
   print correctAnswers
 
   -- | 分析結果を出力
-  writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask evaluationData evaluationPrediction
+  writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask (zip evaluationData correctTrees) (zip evaluationPrediction predictionTrees)
   T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers

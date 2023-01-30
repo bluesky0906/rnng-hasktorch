@@ -12,7 +12,7 @@ data Tree =
   Phrase (T.Text, [Tree]) 
   | Word T.Text
   | Err String T.Text 
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Generic)
 
 instance A.FromJSON Tree
 instance A.ToJSON Tree
@@ -73,11 +73,8 @@ toRNNGSentence posMode (RNNGSentence (words, actions)) (Phrase (label, trees)) =
 toRNNGSentence _ (RNNGSentence (words, actions)) (Err message text)  = RNNGSentence (words, ERROR:actions)
 
 
-printTrees :: 
-  [Tree] ->
-  IO ()
-printTrees cfgTree = do
-  T.putStrLn $ T.unlines $ map (formatCFGtree 0) cfgTree
+instance Show Tree where
+  show cfgTree = T.unpack $ formatCFGtree 0 cfgTree
 
 formatCFGtree ::
   Int ->
