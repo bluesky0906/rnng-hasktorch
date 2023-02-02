@@ -19,6 +19,55 @@ import Data.Store --seralisation
 import Debug.Trace
 
 
+
+{-
+
+check whether a Tree is valid CCG
+
+-}
+
+data Category = SLASH (Category, Category) | BSLASH (Category, Category) | GCATEGORY T.Text
+
+instance Show Category where
+  show (SLASH (left, right)) = "(" ++ show left ++ "/" ++ show right ++ ")"
+  show (BSLASH (left, right)) = "(" ++ show left ++ "\\" ++ show right ++ ")"
+  show (GCATEGORY cat) = T.unpack cat 
+
+groundCategory :: Parser Category
+groundCategory = do
+  category <- T.pack <$> many1 (noneOf "()/\\")
+  return $ GCATEGORY category
+
+parenCategory :: Parser Category
+parenCategory = do
+  optional openParen
+  left <- groundCategory <|> parenCategory
+  slashOrBslash <- T.singleton <$> oneOf "/\\"
+  right <- groundCategory <|> parenCategory
+  optional closeParen
+  if slashOrBslash == T.pack "/"
+    then return $ SLASH (left, right)
+    else return $ BSLASH (left, right)
+
+nonParenCategory :: Parser Category
+nonParenCategory = do
+  left <- groundCategory <|> parenCategory
+  slashOrBslash <- T.singleton <$> oneOf "/\\"
+  right <- groundCategory <|> parenCategory
+  if slashOrBslash == T.pack "/"
+    then return $ SLASH (left, right)
+    else return $ BSLASH (left, right)
+
+categoryParser :: Parser Category
+categoryParser = try nonParenCategory <|> groundCategory
+
+parseCategory :: T.Text -> Category
+parseCategory category = 
+  case parse categoryParser "" category of
+    Left e -> error $ show e
+    Right c -> c
+
+
 {-
 
 parse text file to CCGTree
