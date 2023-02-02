@@ -116,7 +116,7 @@ reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (pre
     ] ++ [
       "Correct tree:\n" ++ show correctTree | isValid
     ] ++ [
-      "predictedTree:\n" ++ show predictedTree | not isCorrect
+      "predictedTree:\n" ++ show predictedTree | not isCorrect && isValid
     ]
 
 {-
