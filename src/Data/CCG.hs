@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module Data.CCG where
+import Data.CCGRule
 import Data.RNNGSentence
 import Data.SyntaxTree
 import GHC.Generics
@@ -19,53 +20,67 @@ import Data.Store --seralisation
 import Debug.Trace
 
 
-
 {-
 
 check whether a Tree is valid CCG
 
 -}
 
-data Category = SLASH (Category, Category) | BSLASH (Category, Category) | GCATEGORY T.Text
+checkValidCCG :: 
+  Tree -> 
+  Bool
+checkValidCCG tree@(Phrase (cat, subtrees)) =
+  case length subtrees of 
+    1 -> if oneSubtree subtrees
+           then all checkValidCCG subtrees
+           else error $ show tree
+    2 -> if twoSubtrees subtrees
+           then all checkValidCCG subtrees
+           else error $ show tree
+    _ -> error $ show tree
+  where
+    oneSubtree [Word _] = True
+    oneSubtree [first] =
+      forwardTypeRaisingRule first tree ||
+      backwardTypeRaisingRule first tree ||
+      -- non-combinatory rules
+      unaryTypeChangingRules first tree
+    twoSubtrees [first, second] = 
+      forwardFunctionalAplicationRule (first, second) tree ||
+      backwardFunctionalAplicationRule (first, second) tree ||
+      forwardCompositionRule (first, second) tree ||
+      backwardCompositionRule (first, second) tree ||
+      forwardCrossingCompositionRule (first, second) tree ||
+      backwardCrossingCompositionRule (first, second) tree ||
+      generalizedForwardCompositionRule (first, second) tree ||
+      generalizedBackwardCompositionRule (first, second) tree ||
+      generalizedForwardCrossingCompositionRule (first, second) tree ||
+      generalizedBackwardCrossingCompositionRule (first, second) tree ||
+      generalizedBackwardCrossingCompositionRule2 (first, second) tree ||
+      forwardSubstitutionRule (first, second) tree ||
+      backwardSubstitutionRule (first, second) tree ||
+      forwardCrossingSubstitutionRule (first, second) tree ||
+      backwardCrossingSubstitutionRule (first, second) tree ||
+      -- non-combinatory rules
+      coordinationRules (first, second) tree ||
+      punctuationRule (first, second) tree ||
+      binaryTypeChangingRules (first, second) tree
+checkValidCCG (Word _) = True
 
-instance Show Category where
-  show (SLASH (left, right)) = "(" ++ show left ++ "/" ++ show right ++ ")"
-  show (BSLASH (left, right)) = "(" ++ show left ++ "\\" ++ show right ++ ")"
-  show (GCATEGORY cat) = T.unpack cat 
+{-
+:l src/Data/CCG.hs
+import Util
+config <- configLoad
+posMode = posModeConfig config
+grammarMode = grammarModeConfig config
 
-groundCategory :: Parser Category
-groundCategory = do
-  category <- T.pack <$> many1 (noneOf "()/\\")
-  return $ GCATEGORY category
+(trainDataPath, evalDataPath, validDataPath) = dataFilePath grammarMode posMode
 
-parenCategory :: Parser Category
-parenCategory = do
-  optional openParen
-  left <- groundCategory <|> parenCategory
-  slashOrBslash <- T.singleton <$> oneOf "/\\"
-  right <- groundCategory <|> parenCategory
-  optional closeParen
-  if slashOrBslash == T.pack "/"
-    then return $ SLASH (left, right)
-    else return $ BSLASH (left, right)
+rnngSentences <- loadActionsFromBinary trainDataPath
+trees = fromRNNGSentences rnngSentences
+Data.List.all checkValidCCG trees
 
-nonParenCategory :: Parser Category
-nonParenCategory = do
-  left <- groundCategory <|> parenCategory
-  slashOrBslash <- T.singleton <$> oneOf "/\\"
-  right <- groundCategory <|> parenCategory
-  if slashOrBslash == T.pack "/"
-    then return $ SLASH (left, right)
-    else return $ BSLASH (left, right)
-
-categoryParser :: Parser Category
-categoryParser = try nonParenCategory <|> groundCategory
-
-parseCategory :: T.Text -> Category
-parseCategory category = 
-  case parse categoryParser "" category of
-    Left e -> error $ show e
-    Right c -> c
+-}
 
 
 {-
