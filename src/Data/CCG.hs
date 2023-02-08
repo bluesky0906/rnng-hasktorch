@@ -26,19 +26,23 @@ check whether a Tree is valid CCG
 
 -}
 
+-- | TODO: validの場合rule名を返すようにする
 checkValidCCG :: 
-  Tree -> 
-  Bool
+  Tree ->
+  Either String Bool
 checkValidCCG tree@(Phrase (cat, subtrees)) =
   case length subtrees of 
     1 -> if oneSubtree subtrees
-           then all checkValidCCG subtrees
-           else error $ show tree
+           then allRight $ map checkValidCCG subtrees
+           else Left (show tree)
     2 -> if twoSubtrees subtrees
-           then all checkValidCCG subtrees
-           else error $ show tree
-    _ -> error $ show tree
+           then allRight $ map checkValidCCG subtrees
+           else Left (show tree)
+    _ -> Left (show tree)
   where
+    allRight [] = Right True
+    allRight (Right result:rest) = allRight rest
+    allRight (Left string:rest) = Left string
     oneSubtree [Word _] = True
     oneSubtree [first] =
       forwardTypeRaisingRule first tree ||
@@ -65,22 +69,8 @@ checkValidCCG tree@(Phrase (cat, subtrees)) =
       coordinationRules (first, second) tree ||
       punctuationRule (first, second) tree ||
       binaryTypeChangingRules (first, second) tree
-checkValidCCG (Word _) = True
-
-{-
-:l src/Data/CCG.hs
-import Util
-config <- configLoad
-posMode = posModeConfig config
-grammarMode = grammarModeConfig config
-
-(trainDataPath, evalDataPath, validDataPath) = dataFilePath grammarMode posMode
-
-rnngSentences <- loadActionsFromBinary trainDataPath
-trees = fromRNNGSentences rnngSentences
-Data.List.all checkValidCCG trees
-
--}
+checkValidCCG (Word _) = Right True
+checkValidCCG (Err err text) = Left (err ++ T.unpack text)
 
 
 {-

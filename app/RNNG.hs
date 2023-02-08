@@ -6,6 +6,7 @@ module RNNG where
 import Model.RNNG
 import Data.RNNGSentence
 import Data.SyntaxTree
+import Data.CCG
 import Util
 import Torch hiding (foldLoop, take, repeat, RuntimeMode)
 -- | hasktorch-tools
@@ -19,6 +20,7 @@ import qualified Data.Text as T    --text
 import qualified Data.Binary as B
 import Data.List
 import Data.Functor
+import Data.Either
 import System.Directory (createDirectory, doesDirectoryExist)
 import Debug.Trace
 import Control.Monad
@@ -103,9 +105,9 @@ reportResult ::
   -- | 正解
   (RNNGSentence, Tree) ->
   -- | 予測
-  ([Action], Tree) ->
+  ([Action], Tree, Either String Bool) ->
   String
-reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (prediction, predictedTree) = 
+reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (prediction, predictedTree, ccgError) = 
   unlines $ [
       "----------------------------------",
       "Sentence:         " ++ show words,
@@ -115,9 +117,15 @@ reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (pre
       "Right or Wrong:   " ++ if isCorrect then "Right" else "Wrong"
     ] ++ [
       "Correct tree:\n" ++ show correctTree | isValid
-    ] ++ [
-      "predictedTree:\n" ++ show predictedTree | not isCorrect && isValid
-    ]
+    ] ++ if not isCorrect && isValid 
+          then [
+                  "Predicted Tree:\n" ++ show predictedTree,
+                  "CCG Valid:\n" ++ case ccgError of
+                                      Left str -> str
+                                      Right _ -> "Valid CCG"
+                ]
+          else []
+
 
 {-
 
@@ -310,6 +318,12 @@ main = do
   putStr "Num of Valid Trees: "
   print $ length $ filterByMask predictionTrees validTreeMask
 
+  -- | CCGの時はちゃんとCCGになってる木を取り出してくる
+  let checkedValidCCG = map checkValidCCG predictionTrees
+      validCCGMask = map isRight checkedValidCCG
+  putStr "Num of Valid CCGtrees: "
+  print $ length $ filterByMask predictionTrees validCCGMask
+
   -- | 全て正解の文を抜き出してくる
   let correctAnswerMask = zipWith ((checkCorrect .) . zip) answers evaluationPrediction
       correctAnswers = filterByMask evaluationData correctAnswerMask
@@ -319,5 +333,5 @@ main = do
   print correctAnswers
 
   -- | 分析結果を出力
-  writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask (zip evaluationData correctTrees) (zip evaluationPrediction predictionTrees)
+  writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask (zip evaluationData correctTrees) (zip3 evaluationPrediction predictionTrees checkedValidCCG)
   T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers

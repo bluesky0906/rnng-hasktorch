@@ -52,7 +52,7 @@ parenCategory = do
   left <- groundCategory <|> parenCategory
   slashOrBslash <- T.singleton <$> oneOf "/\\"
   right <- groundCategory <|> parenCategory
-  optional $ T.singleton <$> char '('
+  optional $ T.singleton <$> char ')'
   if slashOrBslash == T.pack "/"
     then return $ SLASH (left, right)
     else return $ BSLASH (left, right)
