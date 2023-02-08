@@ -120,9 +120,9 @@ reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (pre
     ] ++ if not isCorrect && isValid 
           then [
                   "Predicted Tree:\n" ++ show predictedTree,
-                  "CCG Valid:\n" ++ case ccgError of
-                                      Left str -> str
-                                      Right _ -> "Valid CCG"
+                  "Reason for invalid CCG :\n" ++ case ccgError of
+                                                    Left str -> str
+                                                    Right _ -> "Valid"
                 ]
           else []
 
