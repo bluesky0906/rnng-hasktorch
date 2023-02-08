@@ -10,6 +10,5 @@
   hiddenSizeConfig = 128,
   numOfLayerConfig = 1,
   learningRateConfig = 1e-2,
-  modelFilePathConfig = "",
-  specFilePathConfig = ""
+  evalModelNameConfig = "rnng-hasktorch-ccg-pos-epoch1-lr1e-2",
 }
