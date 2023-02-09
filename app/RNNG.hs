@@ -6,6 +6,7 @@ module RNNG where
 import Model.RNNG
 import Data.RNNGSentence
 import Data.SyntaxTree
+import Data.CCG
 import Util
 import Torch hiding (foldLoop, take, repeat, RuntimeMode)
 -- | hasktorch-tools
@@ -19,7 +20,8 @@ import qualified Data.Text as T    --text
 import qualified Data.Binary as B
 import Data.List
 import Data.Functor
-import System.Directory (createDirectory)
+import Data.Either
+import System.Directory (createDirectory, doesDirectoryExist)
 import Debug.Trace
 import Control.Monad
 
@@ -101,19 +103,28 @@ reportResult ::
   -- | 答えが合っているかどうか
   Bool ->
   -- | 正解
-  RNNGSentence ->
+  (RNNGSentence, Tree) ->
   -- | 予測
-  [Action] ->
+  ([Action], Tree, Either String Bool) ->
   String
-reportResult isValid isCorrect (RNNGSentence (words, actions)) prediction = 
-  unlines [
+reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (prediction, predictedTree, ccgError) = 
+  unlines $ [
       "----------------------------------",
       "Sentence:         " ++ show words,
       "Actions:          " ++ show actions,
       "Prediction:       " ++ show prediction,
       "Valid or Invalid: " ++ if isValid then "Valid" else "Invalid",
       "Right or Wrong:   " ++ if isCorrect then "Right" else "Wrong"
-    ]
+    ] ++ [
+      "Correct tree:\n" ++ show correctTree | isValid
+    ] ++ if not isCorrect && isValid 
+          then [
+                  "Predicted Tree:\n" ++ show predictedTree,
+                  "Reason for invalid CCG:\n" ++ case ccgError of
+                                                    Left str -> str
+                                                    Right _ -> "Valid"
+                ]
+          else []
 
 
 {-
@@ -132,7 +143,8 @@ training ::
   ([RNNGSentence], [RNNGSentence]) ->
   IO (RNNG, [[Float]])
 training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, validationData) = do
-  createDirectory checkpointDirectory
+  existCheckpointDir <- doesDirectoryExist checkpointDirectory 
+  unless existCheckpointDir $ createDirectory checkpointDirectory
   ((trained, _), losses) <- mapAccumM [1..iter] (rnng, (optim, optim, optim)) epochStep
   return (trained, losses)
   where
@@ -212,6 +224,9 @@ main = do
   let mode = modeConfig config
       posMode = posModeConfig config
       grammarMode = grammarModeConfig config
+      parsingMode = case parsingModeConfig config of 
+                      "Point" -> Point
+                      "All" -> All
   modelName <- modelNameConfig True config
   let modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
@@ -274,13 +289,9 @@ main = do
     evaluation
 
   -}
-  let parsingMode = case parsingModeConfig config of 
-                      "Point" -> Point
-                      "All" -> All
-
   -- | model読み込み
-  rnngSpec <- B.decodeFile (if mode == "Eval" then specFilePathConfig config else modelSpecPath)::(IO RNNGSpec)
-  rnngModel <- Torch.Train.loadParams rnngSpec (if mode == "Eval" then modelFilePathConfig config else modelFilePath)
+  rnngSpec <- B.decodeFile modelSpecPath::(IO RNNGSpec)
+  rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
   let answers = fmap (\(RNNGSentence (_, actions)) -> actions) evaluationData
 
   -- | training dataにないactionとその頻度
@@ -301,9 +312,16 @@ main = do
   -- | ちゃんと木になってる予測を抜き出してくる
   let predictedRNNGSentences = zipWith (curry insertDifferentActions) evaluationData evaluationPrediction
       predictionTrees = fromRNNGSentences predictedRNNGSentences
+      correctTrees = fromRNNGSentences evaluationData
       validTreeMask = map (not . isErr) predictionTrees
   putStr "Num of Valid Trees: "
   print $ length $ filterByMask predictionTrees validTreeMask
+
+  -- | CCGの時はちゃんとCCGになってる木を取り出してくる
+  let checkedValidCCG = map checkValidCCG predictionTrees
+      validCCGMask = map isRight checkedValidCCG
+  putStr "Num of Valid CCGtrees: "
+  print $ length $ filterByMask predictionTrees validCCGMask
 
   -- | 全て正解の文を抜き出してくる
   let correctAnswerMask = zipWith ((checkCorrect .) . zip) answers evaluationPrediction
@@ -314,5 +332,5 @@ main = do
   print correctAnswers
 
   -- | 分析結果を出力
-  writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask evaluationData evaluationPrediction
-  T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers
+  writeFile ("reports/" ++ modelName ++ "-" ++ show parsingMode ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask (zip evaluationData correctTrees) (zip3 evaluationPrediction predictionTrees checkedValidCCG)
+  T.writeFile ("reports/" ++ modelName ++ "-" ++ show parsingMode ++ "-classification.txt") $ classificationReport evaluationPrediction answers

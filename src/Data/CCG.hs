@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module Data.CCG where
+import Data.CCGRule
 import Data.RNNGSentence
 import Data.SyntaxTree
 import GHC.Generics
@@ -17,6 +18,59 @@ import Text.Parsec
 import Text.Parsec.Text --parsec
 import Data.Store --seralisation
 import Debug.Trace
+
+
+{-
+
+check whether a Tree is valid CCG
+
+-}
+
+-- | TODO: validの場合rule名を返すようにする
+checkValidCCG :: 
+  Tree ->
+  Either String Bool
+checkValidCCG tree@(Phrase (cat, subtrees)) =
+  case length subtrees of 
+    1 -> if oneSubtree subtrees
+           then allRight $ map checkValidCCG subtrees
+           else Left (show tree)
+    2 -> if twoSubtrees subtrees
+           then allRight $ map checkValidCCG subtrees
+           else Left (show tree)
+    _ -> Left (show tree)
+  where
+    allRight [] = Right True
+    allRight (Right result:rest) = allRight rest
+    allRight (Left string:rest) = Left string
+    oneSubtree [Word _] = True
+    oneSubtree [first] =
+      forwardTypeRaisingRule first tree ||
+      backwardTypeRaisingRule first tree ||
+      -- non-combinatory rules
+      unaryTypeChangingRules first tree
+    twoSubtrees [first, second] = 
+      forwardFunctionalAplicationRule (first, second) tree ||
+      backwardFunctionalAplicationRule (first, second) tree ||
+      forwardCompositionRule (first, second) tree ||
+      backwardCompositionRule (first, second) tree ||
+      forwardCrossingCompositionRule (first, second) tree ||
+      backwardCrossingCompositionRule (first, second) tree ||
+      generalizedForwardCompositionRule (first, second) tree ||
+      generalizedBackwardCompositionRule (first, second) tree ||
+      generalizedForwardCrossingCompositionRule (first, second) tree ||
+      generalizedBackwardCrossingCompositionRule (first, second) tree ||
+      generalizedBackwardCrossingCompositionRule2 (first, second) tree ||
+      forwardSubstitutionRule (first, second) tree ||
+      backwardSubstitutionRule (first, second) tree ||
+      forwardCrossingSubstitutionRule (first, second) tree ||
+      backwardCrossingSubstitutionRule (first, second) tree ||
+      -- non-combinatory rules
+      coordinationRules (first, second) tree ||
+      punctuationRule (first, second) tree ||
+      binaryTypeChangingRules (first, second) tree
+checkValidCCG (Word _) = Right True
+checkValidCCG (Err err text) = Left (err ++ T.unpack text)
 
 
 {-

@@ -119,17 +119,19 @@ modelNameConfig ::
   Config ->
   IO FilePath
 modelNameConfig overwrite Config{..} = do
-  let pos = if posModeConfig then "-pos" else ""
-      modelName = "rnng-" ++ grammarModeConfig ++
-                  pos ++
-                  "-layer" ++ show numOfLayerConfig ++
-                  "-hidden" ++ show hiddenSizeConfig ++
-                  "-epoch" ++  show epochConfig ++
-                  "-lr" ++ show learningRateConfig
-  if overwrite 
+  let modelName = if modeConfig == "Train"
+                    then "rnng-" ++ grammarModeConfig ++
+                      pos ++
+                      "-layer" ++ show numOfLayerConfig ++
+                      "-hidden" ++ show hiddenSizeConfig ++
+                      "-epoch" ++  show epochConfig ++
+                      "-lr" ++ show learningRateConfig
+                    else evalModelNameConfig
+  if overwrite || modeConfig /= "Train"
     then return modelName
     else findNonExistentModelName 1 modelName
   where
+    pos = if posModeConfig then "-pos" else ""
     findNonExistentModelName :: Int -> FilePath -> IO FilePath
     findNonExistentModelName idx modelName = do
       let newModelName = if idx == 1 then modelName else modelName ++ "-" ++ show idx
@@ -146,7 +148,7 @@ getProjectRoot = do
                 Just a -> a)
 
 
-data Config = Config { 
+data Config =  Config { 
   modeConfig :: String, 
   parsingModeConfig :: String,
   posModeConfig :: Bool,
@@ -158,8 +160,7 @@ data Config = Config {
   hiddenSizeConfig :: Natural,
   numOfLayerConfig :: Natural,
   learningRateConfig :: Double,
-  modelFilePathConfig :: String,
-  specFilePathConfig :: String
+  evalModelNameConfig :: String
   } deriving (Generic, Show)
 
 instance FromDhall Config
