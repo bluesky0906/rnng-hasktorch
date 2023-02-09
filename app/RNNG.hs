@@ -120,7 +120,7 @@ reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (pre
     ] ++ if not isCorrect && isValid 
           then [
                   "Predicted Tree:\n" ++ show predictedTree,
-                  "Reason for invalid CCG :\n" ++ case ccgError of
+                  "Reason for invalid CCG:\n" ++ case ccgError of
                                                     Left str -> str
                                                     Right _ -> "Valid"
                 ]
@@ -224,6 +224,9 @@ main = do
   let mode = modeConfig config
       posMode = posModeConfig config
       grammarMode = grammarModeConfig config
+      parsingMode = case parsingModeConfig config of 
+                      "Point" -> Point
+                      "All" -> All
   modelName <- modelNameConfig True config
   let modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
@@ -286,10 +289,6 @@ main = do
     evaluation
 
   -}
-  let parsingMode = case parsingModeConfig config of 
-                      "Point" -> Point
-                      "All" -> All
-
   -- | model読み込み
   rnngSpec <- B.decodeFile modelSpecPath::(IO RNNGSpec)
   rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
@@ -333,5 +332,5 @@ main = do
   print correctAnswers
 
   -- | 分析結果を出力
-  writeFile ("reports/" ++ modelName ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask (zip evaluationData correctTrees) (zip3 evaluationPrediction predictionTrees checkedValidCCG)
-  T.writeFile ("reports/" ++ modelName ++ "-classification.txt") $ classificationReport evaluationPrediction answers
+  writeFile ("reports/" ++ modelName ++ "-" ++ show parsingMode ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask (zip evaluationData correctTrees) (zip3 evaluationPrediction predictionTrees checkedValidCCG)
+  T.writeFile ("reports/" ++ modelName ++ "-" ++ show parsingMode ++ "-classification.txt") $ classificationReport evaluationPrediction answers

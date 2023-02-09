@@ -44,7 +44,7 @@ RNNG model
 -}
 
 
-data ParsingMode = Point | All
+data ParsingMode = Point | All deriving (Show)
 
 
 data PredictActionRNNG where
