@@ -167,7 +167,7 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
       putStrLn $ "#" ++ show idx 
       putStrLn $ "Training Loss: " ++ show trainingLoss
 
-      (validationLoss, validationPrediction) <- evaluate mode batchRNNG' IndexData {..}  validationData
+      (validationLoss, validationPrediction) <- evaluate (Mode device Nothing parsingMode posMode) batchRNNG' IndexData {..}  validationData
       putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
       sampledData <- sampleRandomData 5 (zip validationData validationPrediction)
       putStr $ unlines $ map (uncurry showResult) sampledData
@@ -177,8 +177,7 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
     step rnngSentence@(RNNGSentence (_, actions)) (stepRNNG@(RNNG actionPredictRNNG parseRNNG compRNNG), (stepOpt1, stepOpt2, stepOpt3)) = do
       let answer = toDevice device $ asTensor $ fmap actionIndexFor actions
           output = rnngForward mode stepRNNG IndexData {..} rnngSentence
-      dropoutOutput <- forM output (dropout 0.2 True) 
-      let loss = nllLoss' answer (Torch.stack (Dim 0) dropoutOutput)
+      let loss = nllLoss' answer (Torch.stack (Dim 0) output)
       -- | パラメータ更新
       (updatedActionPredictRNNG, stepOpt1') <- runStep actionPredictRNNG stepOpt1 loss learningRate
       (updatedParseRNNG, stepOpt2') <- runStep parseRNNG stepOpt2 loss learningRate
@@ -257,9 +256,9 @@ main = do
     let wordEmbedSize = fromIntegral (wordEmbedSizeConfig config)::Int
         actionEmbedSize = fromIntegral (actionEmbedSizeConfig config)::Int
         hiddenSize = fromIntegral (hiddenSizeConfig config)::Int
-        numLayer = fromIntegral (numOfLayerConfig config)::Int
+        numLayers = fromIntegral (numOfLayerConfig config)::Int
         device = Device CUDA 0
-        rnngSpec = RNNGSpec device posMode wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
+        rnngSpec = RNNGSpec device posMode numLayers wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
     initRNNGModel <- toDevice device <$> sample rnngSpec
     -- | spec保存
     B.encodeFile modelSpecPath rnngSpec
@@ -275,6 +274,7 @@ main = do
         mode = Mode {
                       device = device,
                       parsingMode = Point,
+                      dropoutProb = Just 0.2,
                       posMode = posMode
                     }
     (trained, losses) <- training mode trainingConfig (initRNNGModel, optim) indexData (trainingData, validationData)
@@ -305,6 +305,7 @@ main = do
   let mode = Mode {
                     device = modelDevice rnngSpec,
                     parsingMode = parsingMode,
+                    dropoutProb = Nothing,
                     posMode = modelPosMode rnngSpec
                   }
   (_, evaluationPrediction) <- evaluate mode rnngModel indexData evaluationData
