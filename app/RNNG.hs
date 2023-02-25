@@ -22,6 +22,7 @@ import Data.List
 import Data.Functor
 import Data.Either
 import System.Directory (createDirectory, doesDirectoryExist)
+import System.IO
 import Debug.Trace
 import Control.Monad
 
@@ -110,7 +111,7 @@ reportResult ::
 reportResult isValid isCorrect (RNNGSentence (words, actions), correctTree) (prediction, predictedTree, ccgError) = 
   unlines $ [
       "----------------------------------",
-      "Sentence:         " ++ show words,
+      "Sentence:         " ++ show (T.unwords words),
       "Actions:          " ++ show actions,
       "Prediction:       " ++ show prediction,
       "Valid or Invalid: " ++ if isValid then "Valid" else "Invalid",
@@ -231,12 +232,11 @@ main = do
   let modelFilePath = "models/" ++ modelName
       modelSpecPath = "models/" ++ modelName ++ "-spec"
       (trainDataPath, evalDataPath, validDataPath) = dataFilePath grammarMode posMode
-
   -- data
   trainingData <- loadActionsFromBinary trainDataPath
   validationData <- loadActionsFromBinary validDataPath
   evaluationData <- loadActionsFromBinary evalDataPath
-  let dataForTraining = trainingData
+  let dataForTraining = evaluationData
   putStrLn $ "Training Data Size: " ++ show (length trainingData)
   putStrLn $ "Validation Data Size: " ++ show (length validationData)
   putStrLn $ "Evaluation Data Size: " ++ show (length evaluationData)
@@ -309,28 +309,36 @@ main = do
                   }
   (_, evaluationPrediction) <- evaluate mode rnngModel indexData evaluationData
 
-  -- | ちゃんと木になってる予測を抜き出してくる
-  let predictedRNNGSentences = zipWith (curry insertDifferentActions) evaluationData evaluationPrediction
-      predictionTrees = fromRNNGSentences predictedRNNGSentences
-      correctTrees = fromRNNGSentences evaluationData
-      validTreeMask = map (not . isErr) predictionTrees
-  putStr "Num of Valid Trees: "
-  print $ length $ filterByMask predictionTrees validTreeMask
+  -- | 分析結果を出力
+  let resultFileName = "reports/" ++ modelName ++ "-" ++ show parsingMode ++ "-result.txt"
+  withFile resultFileName WriteMode $ \handle -> do
+    -- | ちゃんと木になってる予測を抜き出してくる
+    let predictedRNNGSentences = zipWith (curry insertDifferentActions) evaluationData evaluationPrediction
+        predictionTrees = fromRNNGSentences predictedRNNGSentences
+        correctTrees = fromRNNGSentences evaluationData
+        validTreeMask = map (not . isErr) predictionTrees
+    -- putStrLn $ unlines $ map show correctTrees
+    hPutStrLn handle "Num of Valid Trees: "
+    hPrint handle $ length $ filterByMask predictionTrees validTreeMask
 
-  -- | CCGの時はちゃんとCCGになってる木を取り出してくる
-  let checkedValidCCG = map checkValidCCG predictionTrees
-      validCCGMask = map isRight checkedValidCCG
-  putStr "Num of Valid CCGtrees: "
-  print $ length $ filterByMask predictionTrees validCCGMask
+    -- | CCGの時はちゃんとCCGになってる木を取り出してくる
+    let checkedValidCCG = if grammarMode == "CCG" && posMode
+                            then map checkValidCCG predictionTrees
+                            else replicate (length predictionTrees) (Left "CFG or not including pos")
 
-  -- | 全て正解の文を抜き出してくる
-  let correctAnswerMask = zipWith ((checkCorrect .) . zip) answers evaluationPrediction
-      correctAnswers = filterByMask evaluationData correctAnswerMask
-  putStr "Num of Correct Answers: "
-  print $ length correctAnswers
-  putStrLn "Correct Answers: "
-  print correctAnswers
+        validCCGMask = map isRight checkedValidCCG
+    hPutStrLn handle  "Num of Valid CCGtrees: "
+    hPrint handle $ length $ filterByMask predictionTrees validCCGMask
+
+    -- | 全て正解の文を抜き出してくる
+    let correctAnswerMask = zipWith ((checkCorrect .) . zip) answers evaluationPrediction
+        correctAnswers = filterByMask evaluationData correctAnswerMask
+    hPutStr handle "Num of Correct Answers: "
+    hPrint handle $ length correctAnswers
+    hPutStrLn handle "Correct Answers: "
+    hPrint handle correctAnswers
+
+    hPutStr handle $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask (zip evaluationData correctTrees) (zip3 evaluationPrediction predictionTrees checkedValidCCG)
 
   -- | 分析結果を出力
-  writeFile ("reports/" ++ modelName ++ "-" ++ show parsingMode ++ "-result.txt") $ unlines $ zipWith4 reportResult validTreeMask correctAnswerMask (zip evaluationData correctTrees) (zip3 evaluationPrediction predictionTrees checkedValidCCG)
   T.writeFile ("reports/" ++ modelName ++ "-" ++ show parsingMode ++ "-classification.txt") $ classificationReport evaluationPrediction answers
