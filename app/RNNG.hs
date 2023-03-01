@@ -157,6 +157,7 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
       -- | 1stepごとにcheckpointとしてモデル保存
       -- | TODO::　optimizerも保存
       Torch.Train.saveParams trainedModel (checkpointDirectory ++ "/epoch-" ++ show epoch)
+      drawLearningCurve (checkpointDirectory ++ "/epoch-" ++ show epoch ++ ".png") "Learning Curve" [("", reverse losses)]
       return trained
     -- | TODO:: Batch処理にする
     batchStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
@@ -236,7 +237,7 @@ main = do
   trainingData <- loadActionsFromBinary trainDataPath
   validationData <- loadActionsFromBinary validDataPath
   evaluationData <- loadActionsFromBinary evalDataPath
-  let dataForTraining = evaluationData
+  let dataForTraining = trainingData
   putStrLn $ "Training Data Size: " ++ show (length trainingData)
   putStrLn $ "Validation Data Size: " ++ show (length validationData)
   putStrLn $ "Evaluation Data Size: " ++ show (length evaluationData)
