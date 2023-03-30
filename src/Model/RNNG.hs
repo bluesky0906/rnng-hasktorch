@@ -261,7 +261,7 @@ maskImpossibleAction ::
 maskImpossibleAction mode prediction rnngState IndexData {..}  =
   let actions = map indexActionFor [0..((shape prediction !! 0) - 1)]
       boolTensor = maskTensor mode rnngState actions
-  in maskedFill prediction boolTensor (-1e38::Float)
+  in maskedFill prediction boolTensor (-1e10::Float)
 
 
 {-
