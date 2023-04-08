@@ -247,7 +247,6 @@ maskTensor mode@Mode{..} rnngState actions = toDevice device $ asTensor $ map ma
     reduceForbidden = checkREDUCEForbidden mode rnngState
     shiftForbidden = checkSHIFTForbidden mode rnngState
     mask :: Action -> Bool
-    mask ERROR = True
     mask (NT _) = ntForbidden
     mask REDUCE = reduceForbidden
     mask SHIFT = shiftForbidden

@@ -210,7 +210,7 @@ evaluate mode@Mode{..} rnng IndexData {..} rnngSentences = do
           predictionTensor = Torch.stack (Dim 0) $ fmap (argmax (Dim 0) RemoveDim) output
           prediction = fmap indexActionFor (asValue predictionTensor::[Int])
           -- | lossの計算は答えと推論結果の系列長が同じ時だけ
-          loss = if length prediction == length prediction
+          loss = if length actions == length prediction
                   then nllLoss' answer (Torch.stack (Dim 0) output)
                   else asTensor (0::Float)
       return (rnng', (asValue loss::Float, prediction))
@@ -245,7 +245,7 @@ main = do
 
   -- create index data
   let (wordIndexFor, indexWordFor, wordEmbDim) = indexFactory (buildVocab dataForTraining 0 toWordList) (T.pack "unk") Nothing
-      (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 0 toActionList) ERROR Nothing
+      (actionIndexFor, indexActionFor, actionEmbDim) = indexFactory (buildVocab dataForTraining 0 toActionList) (NT (T.pack "unk")) Nothing
       (ntIndexFor, indexNTFor, ntEmbDim) = indexFactory (buildVocab dataForTraining 0 toNTList) (T.pack "unk") Nothing
       indexData = IndexData wordIndexFor indexWordFor actionIndexFor indexActionFor ntIndexFor indexNTFor
   putStrLn $ "WordEmbDim: " ++ show wordEmbDim
