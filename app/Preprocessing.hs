@@ -56,7 +56,7 @@ saveActionData ::
   IO()
 saveActionData grammar posMode dirsPath outputPath = do
   -- 指定されたディレクトリ以下のファイルを取得
-  filePaths <- fmap concat $ traverse (listFiles grammar) dirsPath 
+  filePaths <- concat <$> traverse (listFiles grammar) dirsPath
   --readmeは除外
   treess <- mapM (parseTreefile grammar) $ filter (\f -> takeBaseName f /= "readme") filePaths
   let trees = concat treess

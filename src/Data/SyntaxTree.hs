@@ -74,31 +74,30 @@ toRNNGSentence _ (RNNGSentence (words, actions)) (Err message text)  = RNNGSente
 
 
 instance Show Tree where
-  show cfgTree = T.unpack $ formatCFGtree 0 cfgTree
+  show cfgTree = T.unpack $ formatSyntaxTree 0 cfgTree
 
-formatCFGtree ::
+formatSyntaxTree ::
   Int ->
   Tree ->
   T.Text
-formatCFGtree depth (Phrase (label, (Word word):rest)) =
+formatSyntaxTree depth (Phrase (label, tree)) =
   T.concat [
-    T.replicate depth (T.pack "\t"),
-    T.pack " (",
-    label,
-    T.pack " ",
-    word,
-    T.pack " )"
-  ]
-formatCFGtree depth (Phrase (label, tree)) =
-  T.concat [
-    T.replicate depth (T.pack "\t"),
-    T.pack " (",
-    label,
     T.pack "\n",
-    T.intercalate (T.pack "\n") $ map (formatCFGtree (depth + 1)) tree,
+    T.replicate depth (T.pack "\t"),
+    T.pack " (",
+    label,
+    -- T.pack "\n",
+    T.concat $ map (formatSyntaxTree (depth + 1)) tree,
+    -- T.pack "\n",
     T.pack " )"
+    -- T.pack "\n"
   ]
-formatCFGtree depth (Err msg text) =
+formatSyntaxTree depth (Word word) =
+  T.concat [
+    T.pack " ",
+    word
+  ]
+formatSyntaxTree depth (Err msg text) =
   T.intercalate (T.pack "\n") [
     T.pack $ "Parse Error: " ++ msg ++ " in ",
     text

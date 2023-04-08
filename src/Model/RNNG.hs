@@ -50,8 +50,6 @@ data ParsingMode = Point | All deriving (Show)
 
 data PredictActionRNNG where
   PredictActionRNNG :: {
-    bufferRNN :: RNNParams,
-    bufferh0 :: Parameter,
     w :: Parameter,
     c :: Parameter,
     linearParams :: LinearParams
@@ -65,6 +63,8 @@ data ParseRNNG where
       wordEmbedding :: Parameter,
       ntEmbedding :: Parameter,
       actionEmbedding :: Parameter,
+      bufferRNN :: RNNParams,
+      bufferh0 :: Parameter,
       stackLSTM :: LstmParams,
       stackh0 :: Parameter,
       stackc0 :: Parameter,
@@ -108,9 +108,7 @@ instance
   where
     sample RNNGSpec {..} = do
       predictActionRNNG <- PredictActionRNNG
-        <$> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
-        <*> (makeIndependent =<< randnIO' [hiddenSize * 3, hiddenSize])
+        <$> (makeIndependent =<< randnIO' [hiddenSize * 3, hiddenSize])
         <*> (makeIndependent =<< randnIO' [hiddenSize])
         <*> sample (LinearHypParams modelDevice True hiddenSize actionNumEmbed)
       parseRNNG <- ParseRNNG
@@ -171,10 +169,10 @@ data RNNGState where
       stack :: [Tensor],
       -- | stackを文字列で保存. 逆順で積まれる
       textStack :: [T.Text],
-
       -- | TODO: (h, c)の順にする（hasktorch-toolsに追従）
       -- | stack lstmの隠れ状態の記録　(h, c)
       hiddenStack :: [(Tensor, Tensor)],
+
       -- | bufferをTensorで保存. 正順で積まれる
       buffer :: [Tensor],
       -- | bufferを文字列で保存. 正順で積まれる
@@ -266,7 +264,6 @@ maskTensor mode@Mode{..} rnngState actions = toDevice device $ asTensor $ map ma
     reduceForbidden = checkREDUCEForbidden mode rnngState
     shiftForbidden = checkSHIFTForbidden mode rnngState
     mask :: Action -> Bool
-    mask ERROR = True
     mask (NT _) = ntForbidden
     mask REDUCE = reduceForbidden
     mask SHIFT = shiftForbidden
@@ -280,7 +277,7 @@ maskImpossibleAction ::
 maskImpossibleAction mode prediction rnngState IndexData {..}  =
   let actions = map indexActionFor [0..((shape prediction !! 0) - 1)]
       boolTensor = maskTensor mode rnngState actions
-  in maskedFill prediction boolTensor (1e-38::Float)
+  in maskedFill prediction boolTensor (-1e10::Float)
 
 
 {-
