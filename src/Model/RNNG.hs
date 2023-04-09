@@ -10,9 +10,10 @@ import Data.CFG
 import Data.RNNGSentence
 import Torch hiding (take)
 -- | hasktorch-tools
-import Torch.Layer.RNN (RNNHypParams(..), RNNParams, rnnLayer)
+import Torch.Layer.RNN (RnnHypParams(..), RnnParams, rnnLayers)
 import Torch.Layer.LSTM (LstmHypParams(..), LstmParams, lstmLayers)
 import Torch.Layer.Linear (LinearHypParams(..), LinearParams, linearLayer)
+import Torch.Layer.NonLinear (ActName(..))
 import GHC.Generics
 import qualified Data.Text as T
 import qualified Data.Map as M
@@ -63,12 +64,12 @@ data ParseRNNG where
       wordEmbedding :: Parameter,
       ntEmbedding :: Parameter,
       actionEmbedding :: Parameter,
-      bufferRNN :: RNNParams,
+      bufferRNN :: RnnParams,
       bufferh0 :: Parameter,
       stackLSTM :: LstmParams,
       stackh0 :: Parameter,
       stackc0 :: Parameter,
-      actionRNN :: RNNParams,
+      actionRNN :: RnnParams,
       actionh0 :: Parameter,
       actionStart :: Parameter, -- dummy for empty action history
       bufferGuard :: Parameter, -- dummy for empty buffer
@@ -118,6 +119,10 @@ instance
         <*> (makeIndependent =<< randnIO' [ntNumEmbed, wordEmbedSize])
         -- actionEmbedding
         <*> (makeIndependent =<< randnIO' [actionNumEmbed, wordEmbedSize])
+        -- bufferRNN
+        <*> sample (RnnHypParams modelDevice False actionEmbedSize hiddenSize numLayers True)
+        -- bufferh0
+        <*> (makeIndependent =<< randnIO' [numLayers, hiddenSize])
         -- stackLSTM
         <*> sample (LstmHypParams modelDevice False hiddenSize hiddenSize numLayers True Nothing)
         -- stackh0
@@ -125,9 +130,9 @@ instance
         -- stackc0
         <*> (makeIndependent =<< randnIO' [numLayers, hiddenSize])
         -- actionRNN
-        <*> sample (RNNHypParams modelDevice wordEmbedSize hiddenSize)
+        <*> sample (RnnHypParams modelDevice False wordEmbedSize hiddenSize numLayers True)
         -- actionh0
-        <*> (makeIndependent =<< randnIO' [hiddenSize])
+        <*> (makeIndependent =<< randnIO' [numLayers, hiddenSize])
         -- actionStart
         <*> (makeIndependent =<< randnIO' [actionEmbedSize])
         -- bufferGuard
@@ -165,7 +170,7 @@ data IndexData = IndexData {
 data RNNGState where
   RNNGState ::
     {
-      -- | stackをTensorで保存. 逆順で積まれる
+      -- | stackをTensor<numLayer, hidden>で保存. 逆順で積まれる
       stack :: [Tensor],
       -- | stackを文字列で保存. 逆順で積まれる
       textStack :: [T.Text],
@@ -173,12 +178,12 @@ data RNNGState where
       -- | stack lstmの隠れ状態の記録　(h, c)
       hiddenStack :: [(Tensor, Tensor)],
 
-      -- | bufferをTensorで保存. 正順で積まれる
+      -- | bufferをTensor<hidden>で保存. 正順で積まれる
       buffer :: [Tensor],
       -- | bufferを文字列で保存. 正順で積まれる
       textBuffer :: [T.Text],
 
-      -- | action historyをTensorで保存. 逆順で積まれる
+      -- | action historyをTensor<numLayer, hidden>で保存. 逆順で積まれる
       actionHistory :: [Tensor],
       -- | action historyを文字列で保存. 逆順で積まれる
       textActionHistory :: [Action],
@@ -277,7 +282,14 @@ maskImpossibleAction ::
 maskImpossibleAction mode prediction rnngState IndexData {..}  =
   let actions = map indexActionFor [0..((shape prediction !! 0) - 1)]
       boolTensor = maskTensor mode rnngState actions
-  in maskedFill prediction boolTensor (-1e10::Float)
+  in maskedFill prediction boolTensor (-1e38::Float)
+
+extractLastLayerTensor ::
+  -- | an Tensor of <m, n>
+  Tensor ->
+  -- | an Tensor of <n>
+  Tensor
+extractLastLayerTensor tensor = tensor ! (head (shape tensor) - 1) 
 
 
 {-
@@ -295,14 +307,13 @@ predictNextAction ::
   -- | possibility of actions
   Tensor
 predictNextAction mode@Mode{..} (RNNG PredictActionRNNG {..} _ _) RNNGState {..} indexData = 
-  let (_, bufferEmbedding) = rnnLayer bufferRNN (toDependent bufferh0) dropoutProb (Torch.stack (Dim 0) buffer)
+  let bufferEmbedding = head buffer
       -- | 最終層のhnを取り出す
-      stackhn = fst $ head hiddenStack
-      stackEmbedding = stackhn ! (head (shape stackhn) - 1) 
-      actionEmbedding = hiddenActionHistory
+      stackEmbedding = extractLastLayerTensor $ fst $ head hiddenStack
+      actionEmbedding = extractLastLayerTensor hiddenActionHistory
       -- | ut + tanh[W[ot, st, ht] + c]
       ut = Torch.tanh (cat (Dim 0) [traceShow ("stack" ++ (show $ shape stackEmbedding)) stackEmbedding, traceShow ("buffer" ++ (show $ shape bufferEmbedding)) bufferEmbedding, traceShow ("aciton" ++ (show $ shape actionEmbedding)) actionEmbedding] `matmul` toDependent w + toDependent c)
-      actionLogit = linearLayer linearParams ut
+      actionLogit = linearLayer linearParams (traceShow ("ut" ++ (show $ shape ut)) ut)
       maskedAction = maskImpossibleAction mode actionLogit RNNGState {..} indexData
   in logSoftmax (Dim 0) maskedAction
 
@@ -315,18 +326,18 @@ stackLSTMForward ::
   [Tensor] ->
   -- | (hn, cn)
   (Tensor, Tensor)
-stackLSTMForward Mode{..} stackLSTM stack newElem = snd $ lstmLayers stackLSTM stack dropoutProb (traceShow ("stackLSTMForward" ++ show (shape $ Torch.stack (Dim 0) newElem)) (Torch.stack (Dim 0) newElem))
+stackLSTMForward Mode{..} stackLSTM stack newElem = snd $ lstmLayers stackLSTM dropoutProb stack (traceShow ("stackLSTMForward" ++ show (shape $ Torch.stack (Dim 0) newElem)) (Torch.stack (Dim 0) newElem))
 
 actionRNNForward ::
   Mode ->
-  RNNParams ->
+  RnnParams ->
   -- | h_n
   Tensor ->
   -- | new Elements
   [Tensor] ->
   -- | h_n+1
   Tensor
-actionRNNForward Mode{..} actionRNN hn newElem = snd $ rnnLayer actionRNN hn dropoutProb (Torch.stack (Dim 0) newElem)
+actionRNNForward Mode{..} actionRNN hn newElem = snd $ rnnLayers actionRNN Tanh dropoutProb hn (Torch.stack (Dim 0) newElem)
 
 parse ::
   Mode ->
@@ -377,9 +388,9 @@ parse mode@Mode {..} (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGSt
       (_, newHiddenStack) = splitAt (idx + 1) hiddenStack
       -- composeする
       -- 最終層のfwdとrevをconcatしてaffine変換する
-      composedhn = fst $ snd $ lstmLayers compLSTM (toDependent comph0, toDependent compc0) dropoutProb (Torch.stack (Dim 0) $ reverse subTree)
-      lastLayerhn = reshape [2 * (shape composedhn !! 1)] (traceShow (shape $ sliceDim 0 (head (shape composedhn) - 2) (head (shape composedhn)) 1 composedhn) (sliceDim 0 (head (shape composedhn) - 2) (head (shape composedhn)) 1 composedhn))
-      composedSubTree = (traceShow lastLayerhn lastLayerhn) `matmul` toDependent compW + toDependent compC
+      composedhn = fst $ lstmLayers compLSTM dropoutProb (toDependent comph0, toDependent compc0) (Torch.stack (Dim 0) $ reverse (traceShow ("subTree" ++ (show $ length subTree)) subTree))
+      lastLayerhn = select 0 1 composedhn
+      composedSubTree = lastLayerhn `matmul` toDependent compW + toDependent compC
   in RNNGState {
       stack = composedSubTree:newStack,
       textStack = T.intercalate (T.pack " ") (reverse $ T.pack ">":textSubTree):newTextStack,
@@ -428,12 +439,12 @@ rnngForward ::
   RNNGSentence ->
   [Tensor]
 rnngForward mode@Mode{..} (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} (RNNGSentence (sents, actions)) =
-  let sentsTensorList = fmap (embedding' (toDependent wordEmbedding) . toDevice device . asTensor . wordIndexFor) sents
+  let sentsTensor = Torch.stack (Dim 0) $ toDependent bufferGuard : fmap (embedding' (toDependent wordEmbedding) . toDevice device . asTensor . wordIndexFor) (reverse sents)
       initRNNGState = RNNGState {
         stack = [toDependent stackGuard],
         textStack = [],
         hiddenStack = [stackLSTMForward mode stackLSTM (toDependent stackh0, toDependent stackc0) [toDependent stackGuard]],
-        buffer = sentsTensorList ++ [toDependent bufferGuard],
+        buffer = reverse $ fmap (reshape [shape sentsTensor !! 1]) $ split 1 (Dim 0) $ fst $ rnnLayers bufferRNN Tanh dropoutProb (toDependent bufferh0) sentsTensor,
         textBuffer = sents,
         actionHistory = [toDependent actionStart],
         textActionHistory = [],
