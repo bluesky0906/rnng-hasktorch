@@ -23,7 +23,7 @@ RNNGs use Wall Street Jarnal corpus of Penn Treebank or CCGbank as data for Engl
 Run the following command to preprocess those data for rnng-hasktorch. This command generates three files (training[grammar], validation[grammar] and evaluation[grammar]) under the `data/` repository.
 
 ```
-$ stack run Preprocessing -- --path [/path/to/wsj] --grammar [CFG or CCG]
+$ stack run Preprocessing -- --path [/path/to/wsj] --grammar [CFG or CCG] --pos [Bool]
 ```
 
 ## Training and Evaluation
