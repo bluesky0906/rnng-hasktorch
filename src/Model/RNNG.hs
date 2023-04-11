@@ -312,8 +312,8 @@ predictNextAction mode@Mode{..} (RNNG PredictActionRNNG {..} _ _) RNNGState {..}
       stackEmbedding = extractLastLayerTensor $ fst $ head hiddenStack
       actionEmbedding = extractLastLayerTensor hiddenActionHistory
       -- | ut + tanh[W[ot, st, ht] + c]
-      ut = Torch.tanh (cat (Dim 0) [traceShow ("stack" ++ (show $ shape stackEmbedding)) stackEmbedding, traceShow ("buffer" ++ (show $ shape bufferEmbedding)) bufferEmbedding, traceShow ("aciton" ++ (show $ shape actionEmbedding)) actionEmbedding] `matmul` toDependent w + toDependent c)
-      actionLogit = linearLayer linearParams (traceShow ("ut" ++ (show $ shape ut)) ut)
+      ut = Torch.tanh (cat (Dim 0) [stackEmbedding, bufferEmbedding, actionEmbedding] `matmul` toDependent w + toDependent c)
+      actionLogit = linearLayer linearParams ut
       maskedAction = maskImpossibleAction mode actionLogit RNNGState {..} indexData
   in logSoftmax (Dim 0) maskedAction
 
@@ -326,7 +326,7 @@ stackLSTMForward ::
   [Tensor] ->
   -- | (hn, cn)
   (Tensor, Tensor)
-stackLSTMForward Mode{..} stackLSTM stack newElem = snd $ lstmLayers stackLSTM dropoutProb stack (traceShow ("stackLSTMForward" ++ show (shape $ Torch.stack (Dim 0) newElem)) (Torch.stack (Dim 0) newElem))
+stackLSTMForward Mode{..} stackLSTM stack newElem = snd $ lstmLayers stackLSTM dropoutProb stack (Torch.stack (Dim 0) newElem)
 
 actionRNNForward ::
   Mode ->
@@ -388,13 +388,13 @@ parse mode@Mode {..} (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGSt
       (_, newHiddenStack) = splitAt (idx + 1) hiddenStack
       -- composeする
       -- 最終層のfwdとrevをconcatしてaffine変換する
-      composedhn = fst $ lstmLayers compLSTM dropoutProb (toDependent comph0, toDependent compc0) (Torch.stack (Dim 0) $ reverse (traceShow ("subTree" ++ (show $ length subTree)) subTree))
+      composedhn = fst $ lstmLayers compLSTM dropoutProb (toDependent comph0, toDependent compc0) (Torch.stack (Dim 0) $ reverse subTree)
       lastLayerhn = select 0 1 composedhn
       composedSubTree = lastLayerhn `matmul` toDependent compW + toDependent compC
   in RNNGState {
       stack = composedSubTree:newStack,
       textStack = T.intercalate (T.pack " ") (reverse $ T.pack ">":textSubTree):newTextStack,
-      hiddenStack = stackLSTMForward mode stackLSTM (head newHiddenStack) [traceShow (shape composedSubTree) composedSubTree]:newHiddenStack,
+      hiddenStack = stackLSTMForward mode stackLSTM (head newHiddenStack) [composedSubTree]:newHiddenStack,
       buffer = buffer,
       textBuffer = textBuffer,
       actionHistory = action_embedding:actionHistory,
@@ -417,7 +417,7 @@ predict ::
   ([Tensor], RNNGState)
 predict mode@(Mode _ _ Point _) _ _ [] results rnngState = (reverse results, rnngState)
 predict mode@(Mode _ _ Point _) rnng indexData (action:rest) predictionHitory rnngState =
-  let prediction = predictNextAction mode rnng (traceShow rnngState rnngState) indexData
+  let prediction = predictNextAction mode rnng rnngState indexData
       newRNNGState = parse mode rnng indexData rnngState action
   in predict mode rnng indexData rest (prediction:predictionHitory) newRNNGState
 
