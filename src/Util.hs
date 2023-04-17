@@ -123,31 +123,20 @@ getProjectRoot = do
 
 modelNameConfig ::
   -- | overwrite
-  Bool ->
   Config ->
-  IO FilePath
-modelNameConfig overwrite Config{..} = do
-  let modelName = if modeConfig == "Train"
-                    then "rnng-" ++ grammarModeConfig ++
-                      pos ++
-                      "-layer" ++ show numOfLayerConfig ++
-                      "-hidden" ++ show hiddenSizeConfig ++
-                      "-epoch" ++  show epochConfig ++
-                      "-lr" ++ show learningRateConfig
-                    else evalModelNameConfig
-  if overwrite || modeConfig /= "Train"
-    then return modelName
-    else findNonExistentModelName 1 modelName
+  FilePath
+modelNameConfig Config{..} =
+  if modeConfig == "Train"
+    then "rnng-" ++ grammarModeConfig ++
+      pos ++
+      "-layer" ++ show numOfLayerConfig ++
+      "-hidden" ++ show hiddenSizeConfig ++
+      "-epoch" ++  show epochConfig ++
+      "-lr" ++ show learningRateConfig ++
+      if modelVersionConfig == "" then "" else "-" ++ modelVersionConfig
+    else evalModelNameConfig
   where
     pos = if posModeConfig then "-pos" else ""
-    findNonExistentModelName :: Int -> FilePath -> IO FilePath
-    findNonExistentModelName idx modelName = do
-      let newModelName = if idx == 1 then modelName else modelName ++ "-" ++ show idx
-      -- specの存在で判断
-      exist <- doesFileExist ("models/" ++ newModelName ++ ".spec")
-      if exist 
-        then findNonExistentModelName (idx + 1) modelName
-        else return newModelName
 
 data Config =  Config { 
   modeConfig :: String, 
@@ -161,6 +150,7 @@ data Config =  Config {
   hiddenSizeConfig :: Natural,
   numOfLayerConfig :: Natural,
   learningRateConfig :: Double,
+  modelVersionConfig :: String,
   resumeTrainingConfig :: Bool,
   evalModelNameConfig :: String
   } deriving (Generic, Show)
