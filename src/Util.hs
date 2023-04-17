@@ -113,6 +113,14 @@ dataFilePath grammar posMode =
   where
     suffix = grammar ++ if posMode then "POS" else ""
 
+getProjectRoot :: IO String
+getProjectRoot = do
+  projectRoot <- getProjectRootWeightedCurrent
+  return (case projectRoot of
+                Nothing -> "./"
+                Just a -> a)
+
+
 modelNameConfig ::
   -- | overwrite
   Bool ->
@@ -135,18 +143,11 @@ modelNameConfig overwrite Config{..} = do
     findNonExistentModelName :: Int -> FilePath -> IO FilePath
     findNonExistentModelName idx modelName = do
       let newModelName = if idx == 1 then modelName else modelName ++ "-" ++ show idx
-      exist <- doesFileExist newModelName
+      -- specの存在で判断
+      exist <- doesFileExist ("models/" ++ newModelName ++ ".spec")
       if exist 
         then findNonExistentModelName (idx + 1) modelName
         else return newModelName
-
-getProjectRoot :: IO String
-getProjectRoot = do
-  projectRoot <- getProjectRootWeightedCurrent
-  return (case projectRoot of
-                Nothing -> "./"
-                Just a -> a)
-
 
 data Config =  Config { 
   modeConfig :: String, 
@@ -160,6 +161,7 @@ data Config =  Config {
   hiddenSizeConfig :: Natural,
   numOfLayerConfig :: Natural,
   learningRateConfig :: Double,
+  resumeTrainingConfig :: Bool,
   evalModelNameConfig :: String
   } deriving (Generic, Show)
 
