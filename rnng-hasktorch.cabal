@@ -31,6 +31,7 @@ library
       Data.RNNGSentence
       Data.SyntaxTree
       Model.RNNG
+      Train.File
       Util
   other-modules:
       Paths_rnng_hasktorch

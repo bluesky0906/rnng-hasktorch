@@ -8,6 +8,7 @@ import Data.RNNGSentence
 import Data.SyntaxTree
 import Data.CCG
 import Util
+import Train.File
 import Torch hiding (foldLoop, take, repeat, RuntimeMode)
 -- | hasktorch-tools
 import Torch.Control (mapAccumM, makeBatch)
@@ -21,14 +22,15 @@ import qualified Data.Binary as B
 import Data.List
 import Data.Functor
 import Data.Either
-import System.Directory (createDirectory, doesDirectoryExist)
+import System.Directory (createDirectory, doesDirectoryExist, doesFileExist)
 import System.IO
+import Text.Directory (checkFile) --nlp-tools
 import Debug.Trace
 import Control.Monad
 
 
 data TrainingConfig = TrainingConfig {
-  iter :: Int, -- epoch数
+  iter :: [Int], -- epoch数
   validationStep :: Int,
   learningRate :: LearningRate,
   modelName :: String
@@ -146,7 +148,7 @@ training ::
 training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (trainingData, validationData) = do
   existCheckpointDir <- doesDirectoryExist checkpointDirectory 
   unless existCheckpointDir $ createDirectory checkpointDirectory
-  ((trained, _), losses) <- mapAccumM [1..iter] (rnng, (optim, optim, optim)) epochStep
+  ((trained, _), losses) <- mapAccumM iter (rnng, (optim, optim, optim)) epochStep
   return (trained, losses)
   where
     checkpointDirectory = "models/" ++ modelName ++ "-checkpoints"
@@ -156,8 +158,8 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
       trained@((trainedModel, _), losses) <- mapAccumM [1..(length batches)] model batchStep
       -- | 1stepごとにcheckpointとしてモデル保存
       -- | TODO::　optimizerも保存
-      Torch.Train.saveParams trainedModel (checkpointDirectory ++ "/epoch-" ++ show epoch)
-      drawLearningCurve (checkpointDirectory ++ "/epoch-" ++ show epoch ++ ".png") "Learning Curve" [("", reverse losses)]
+      Torch.Train.saveParams trainedModel $ checkpointModelPath modelName epoch
+      drawLearningCurve (checkpointImgPath modelName epoch) "Learning Curve" [("", reverse losses)]
       return trained
     -- | TODO:: Batch処理にする
     batchStep :: (Optimizer o) => Int -> (RNNG, (o, o, o)) -> IO ((RNNG, (o, o, o)), Float)
@@ -215,6 +217,7 @@ evaluate mode@Mode{..} rnng IndexData {..} rnngSentences = do
       return (rnng', (asValue loss::Float, prediction))
 
 
+
 main :: IO()
 main = do
   -- experiment setting
@@ -228,9 +231,10 @@ main = do
       parsingMode = case parsingModeConfig config of 
                       "Point" -> Point
                       "All" -> All
-  modelName <- modelNameConfig True config
-  let modelFilePath = "models/" ++ modelName
-      modelSpecPath = "models/" ++ modelName ++ "-spec"
+      resumeTraining = resumeTrainingConfig config
+  modelName <- modelNameConfig resumeTraining config
+  let modelFilePath = modelPath modelName
+      modelSpecPath = specPath modelName
       (trainDataPath, evalDataPath, validDataPath) = dataFilePath grammarMode posMode
   -- data
   trainingData <- loadActionsFromBinary trainDataPath
@@ -253,20 +257,27 @@ main = do
   putStrLn "======================================"
 
   when (mode == "Train") $ do
+    let device = Device CUDA 0
     -- model spec
-    let wordEmbedSize = fromIntegral (wordEmbedSizeConfig config)::Int
-        actionEmbedSize = fromIntegral (actionEmbedSizeConfig config)::Int
-        hiddenSize = fromIntegral (hiddenSizeConfig config)::Int
-        numLayers = fromIntegral (numOfLayerConfig config)::Int
-        device = Device CUDA 0
-        rnngSpec = RNNGSpec device posMode numLayers wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
-    initRNNGModel <- toDevice device <$> sample rnngSpec
-    -- | spec保存
-    B.encodeFile modelSpecPath rnngSpec
+    (initRNNGModel, startEpoch) <- if resumeTraining 
+                                      then do
+                                        rnngSpec <- B.decodeFile modelSpecPath::(IO RNNGSpec)
+                                        (model, lastEpoch) <- loadCheckPoint modelName rnngSpec
+                                        return (model, lastEpoch+1)
+                                      else do
+                                        let wordEmbedSize = fromIntegral (wordEmbedSizeConfig config)::Int
+                                            actionEmbedSize = fromIntegral (actionEmbedSizeConfig config)::Int
+                                            hiddenSize = fromIntegral (hiddenSizeConfig config)::Int
+                                            numLayers = fromIntegral (numOfLayerConfig config)::Int
+                                            rnngSpec = RNNGSpec device posMode numLayers wordEmbedSize actionEmbedSize wordEmbDim actionEmbDim ntEmbDim hiddenSize
+                                        -- | spec保存
+                                        B.encodeFile modelSpecPath rnngSpec
+                                        initRNNGModel <- toDevice device <$> sample rnngSpec
+                                        return (initRNNGModel, 1)
 
     -- | training
     let trainingConfig = TrainingConfig {
-                           iter = fromIntegral (epochConfig config)::Int,
+                           iter = [(startEpoch)..(fromIntegral (epochConfig config)::Int)],
                            learningRate = toDevice device $ asTensor (learningRateConfig config),
                            validationStep = fromIntegral (validationStepConfig config)::Int,
                            modelName = modelName
