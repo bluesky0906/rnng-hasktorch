@@ -81,9 +81,12 @@ data ParseRNNG where
 data CompRNNG where
   CompRNNG ::
     {
-      compLSTM :: LstmParams,
-      comph0 :: Parameter,
-      compc0 :: Parameter,
+      compForLSTM :: LstmParams,
+      compForh0 :: Parameter,
+      compForc0 :: Parameter,
+      compRevLSTM :: LstmParams,
+      compRevh0 :: Parameter,
+      compRevc0 :: Parameter,
       compW :: Parameter,
       compC :: Parameter
     } ->
@@ -141,9 +144,12 @@ instance
         <*> (makeIndependent =<< randnIO' [wordEmbedSize])
       compRNNG <- CompRNNG
         -- dev, bidirectional, inputSize, hiddenSize, numLayers, hasBias, projSize
-        <$> sample (LstmHypParams modelDevice True hiddenSize hiddenSize numLayers True Nothing)
-        <*> (makeIndependent =<< randnIO' [2 * numLayers, hiddenSize])
-        <*> (makeIndependent =<< randnIO' [2 * numLayers, hiddenSize])
+        <$> sample (LstmHypParams modelDevice False hiddenSize hiddenSize numLayers True Nothing)
+        <*> (makeIndependent =<< randnIO' [numLayers, hiddenSize])
+        <*> (makeIndependent =<< randnIO' [numLayers, hiddenSize])
+        <*> sample (LstmHypParams modelDevice False hiddenSize hiddenSize numLayers True Nothing)
+        <*> (makeIndependent =<< randnIO' [numLayers, hiddenSize])
+        <*> (makeIndependent =<< randnIO' [numLayers, hiddenSize])
         -- compW
         <*> (makeIndependent =<< randnIO' [hiddenSize * 2, hiddenSize])
         -- compC
@@ -386,10 +392,13 @@ parse mode@Mode {..} (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGSt
       (textSubTree, newTextStack) = splitAt (idx + 1) textStack
       (subTree, newStack) = splitAt (idx + 1) stack
       (_, newHiddenStack) = splitAt (idx + 1) hiddenStack
+      label = last subTree
+      words = tail subTree
       -- composeする
       -- 最終層のfwdとrevをconcatしてaffine変換する
-      composedhn = fst $ lstmLayers compLSTM dropoutProb (toDependent comph0, toDependent compc0) (Torch.stack (Dim 0) $ reverse subTree)
-      lastLayerhn = select 0 1 composedhn
+      composedForhn = select 0 1 $ fst $ lstmLayers compForLSTM dropoutProb (toDependent compForh0, toDependent compForc0) (Torch.stack (Dim 0) $ label:reverse subTree)
+      composedRevhn = select 0 1 $ fst $ lstmLayers compRevLSTM dropoutProb (toDependent compRevh0, toDependent compRevc0) (Torch.stack (Dim 0) $ label:subTree)
+      lastLayerhn = Torch.cat (Dim 0) [composedForhn, composedRevhn]
       composedSubTree = lastLayerhn `matmul` toDependent compW + toDependent compC
   in RNNGState {
       stack = composedSubTree:newStack,
