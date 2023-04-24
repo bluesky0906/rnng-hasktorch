@@ -232,7 +232,7 @@ main = do
                       "Point" -> Point
                       "All" -> All
       resumeTraining = resumeTrainingConfig config
-  modelName <- modelNameConfig resumeTraining config
+      modelName = modelNameConfig config
   let modelFilePath = modelPath modelName
       modelSpecPath = specPath modelName
       (trainDataPath, evalDataPath, validDataPath) = dataFilePath grammarMode posMode
