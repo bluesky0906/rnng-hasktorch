@@ -332,7 +332,7 @@ stackLSTMForward ::
   [Tensor] ->
   -- | (hn, cn)
   (Tensor, Tensor)
-stackLSTMForward Mode{..} stackLSTM stack newElem = snd $ lstmLayers stackLSTM dropoutProb stack (Torch.stack (Dim 0) newElem)
+stackLSTMForward Mode{..} stackLSTM stack newElem = snd $ lstmLayers stackLSTM dropoutProb False stack (Torch.stack (Dim 0) newElem)
 
 actionRNNForward ::
   Mode ->
@@ -396,8 +396,8 @@ parse mode@Mode {..} (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGSt
       words = tail subTree
       -- composeする
       -- 最終層のfwdとrevをconcatしてaffine変換する
-      composedForhn = select 0 1 $ fst $ lstmLayers compForLSTM dropoutProb (toDependent compForh0, toDependent compForc0) (Torch.stack (Dim 0) $ label:reverse subTree)
-      composedRevhn = select 0 1 $ fst $ lstmLayers compRevLSTM dropoutProb (toDependent compRevh0, toDependent compRevc0) (Torch.stack (Dim 0) $ label:subTree)
+      composedForhn = select 0 1 $ fst $ lstmLayers compForLSTM dropoutProb False (toDependent compForh0, toDependent compForc0) (Torch.stack (Dim 0) $ label:reverse subTree)
+      composedRevhn = select 0 1 $ fst $ lstmLayers compRevLSTM dropoutProb False (toDependent compRevh0, toDependent compRevc0) (Torch.stack (Dim 0) $ label:subTree)
       lastLayerhn = Torch.cat (Dim 0) [composedForhn, composedRevhn]
       composedSubTree = lastLayerhn `matmul` toDependent compW + toDependent compC
   in RNNGState {
