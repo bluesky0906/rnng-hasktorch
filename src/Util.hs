@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE FlexibleInstances #-}
+-- {-# LANGUAGE BlockArguments #-}
 
 module Util where
 import qualified Data.Text as T  
@@ -13,6 +15,11 @@ import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
 import System.Random
 import Dhall hiding ( map )
 import Graphics.Gnuplot.Simple
+import Debug.Trace
+
+import Torch 
+-- | hasktorch-tools
+import Torch.Tensor.Util (unstack)
 
 {-
 
@@ -52,6 +59,61 @@ indexFactory dic unk padding =
     dic_size = length dic
     wordToIndexFactory map wrd = M.findWithDefault 0 wrd map
     indexToWordFactory map idx = M.findWithDefault unk idx map
+
+
+replaceAt :: [a] -> (Int, a) ->  [a]
+replaceAt [] _ = []
+replaceAt (_:xs) (0, y) = y : xs
+replaceAt (x:xs) (n, y) = x : replaceAt xs ((n - 1), y)
+
+-- TODO: Tensorのままやりたい
+class Replaceable a where
+  -- 指定した次元のtensorを置き換える(2次元、３次元をサポート)
+  (//) ::
+    -- target
+    Tensor ->
+    -- indice
+    [a] ->
+    -- output
+    Tensor
+
+subst :: Tensor -> [Tensor] -> Tensor -> Tensor
+subst target indices alt = stack (Dim 0) $ replace indices
+  where
+    replace (idx0:[]) = foldl' replaceAt (unstack target) (zip (asValue idx0::[Int]) (unstack alt))
+    replace (idx0:idx1:[]) = map (stack (Dim 0)) $ foldl' replaceAt2 (map unstack (unstack target)) (zip3 (asValue idx0::[Int]) (asValue idx1::[Int]) (unstack alt))
+    replaceAt1 :: [a] -> (Int, a) ->  [a]
+    replaceAt1 [] _ = []
+    replaceAt1 (_:xs) (0, y) = y : xs
+    replaceAt1 (x:xs) (n, y) = x : replaceAt1 xs ((n - 1), y)
+    replaceAt2 :: [[a]] -> (Int, Int, a) ->  [[a]]
+    replaceAt2 t (idx0, idx1, x) = replaceAt t (idx0, (replaceAt (t !! idx0) (idx1, x)))
+
+instance Replaceable (Int, Tensor) where
+  (//) target indices =
+    stack (Dim 0) replaced 
+    where
+      replaced = foldl replaceAt (unstack target) indices
+
+instance Replaceable (Int, Int, Tensor) where
+  (//) target indices =
+    stack (Dim 0) (map (stack (Dim 0)) replaced)
+    where
+      replaced = foldl' subst' (map unstack (unstack target)) indices
+      subst' :: [[Tensor]] -> (Int, Int, Tensor) -> [[Tensor]]
+      subst' t (idx0, idx1, x) = replaceAt t (idx0, (replaceAt (t !! idx0) (idx1, x)))
+
+(!.) :: Tensor -> [Tensor] -> Tensor
+target !. indices =
+  case length indices of 
+    1 -> target ! (head indices)
+    2 -> Torch.stack (Dim 0) $ map ((target !) . toTuple2) idxList
+    3 -> Torch.stack (Dim 0) $ map ((target !) . toTuple3) idxList
+  where
+    idxList = (asValue (stack (Dim 1) indices)::[[Int]])
+    toTuple1 (a:[]) = (a)
+    toTuple2 (a:b:[]) = (a,b)
+    toTuple3 (a:b:c:[]) = (a,b,c)
 
 {-
 
@@ -123,11 +185,14 @@ getProjectRoot = do
 
 modelNameConfig ::
   -- | overwrite
+  String ->
   Config ->
   FilePath
-modelNameConfig Config{..} =
+modelNameConfig rnngMode Config{..} =
   if modeConfig == "Train"
-    then "rnng-" ++ grammarModeConfig ++
+    then 
+      "rnng-" ++ rnngMode ++
+      "-" ++ grammarModeConfig ++
       pos ++
       "-layer" ++ show numOfLayerConfig ++
       "-hidden" ++ show hiddenSizeConfig ++
@@ -145,6 +210,7 @@ data Config =  Config {
   grammarModeConfig :: String,
   epochConfig :: Natural,
   validationStepConfig :: Natural,
+  batchSizeConfig :: Natural,
   actionEmbedSizeConfig :: Natural,
   wordEmbedSizeConfig :: Natural,
   hiddenSizeConfig :: Natural,

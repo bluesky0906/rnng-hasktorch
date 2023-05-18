@@ -58,6 +58,13 @@ extractSentences :: [RNNGSentence] -> [Sentence]
 extractSentences [] = []
 extractSentences ((RNNGSentence (words, _)):rest) = words:(extractSentences rest)
 
+unzipRNNGSentence :: [RNNGSentence] -> ([Sentence], [[Action]])
+unzipRNNGSentence = unzip . toPair 
+  where 
+    toPair :: [RNNGSentence] -> [(Sentence, [Action])]
+    toPair [] = []
+    toPair ((RNNGSentence (words, actions)):rest) = (words, actions):(toPair rest)
+
 toWordList :: [RNNGSentence] -> [T.Text]
 toWordList [] = []
 toWordList ((RNNGSentence (words, _)):rest) = words ++ toWordList rest
