@@ -95,7 +95,7 @@ rnngCellForward RNNGCell{..} indexData@IndexData{..} dropoutProb wordVecs action
   
       batchSize = size 0 actionIdxTensor
       newInput = zeros [batchSize, wDim] (withDevice dev defaultOpts) -- <batchSize, wDim>
-  print actionIdxTensor
+  -- print actionIdxTensor
   -- shift
   --  TODO: wordvec idxの動作確認
   (shiftedStack, shiftedInput) <- 
@@ -127,23 +127,19 @@ rnngCellForward RNNGCell{..} indexData@IndexData{..} dropoutProb wordVecs action
   (reducedStack, reducedInput) <-
     if (size 0 reduceBatches > 0)
       then do
-        -- print ntedStack
         let (reducedChildren, childLength, reducedNts, reducedNtIds) = collectReducedChildren stack reduceBatches
             newChild = lstmCompositionForward composition dropoutProb reducedChildren childLength reducedNts reducedNtIds
             reducedStack = doReduce ntedStack reduceBatches newChild
-            reducedInput = subst ntedInput [reduceBatches] ntedInput
+            reducedInput = subst ntedInput [reduceBatches] newChild
         return (reducedStack, reducedInput)
       else return (ntedStack, ntedInput)
-  -- -- 消す
-  -- let (reducedStack, reducedInput) = (ntedStack, ntedInput)
-
 
   let (newHidden, newCell) = multiLayerLSTMCellForward stackRNN dropoutProb (Just (hiddenHead reducedStack 1, cellHead reducedStack 1)) (view [-1, wDim] reducedInput)
       newStack = updateHidden reducedStack newHidden newCell
       h = select 1 (-1) $ hiddenHead newStack 0
 
-  putStrLn "--------------------------------------------"
-  putStrLn ""
+  -- putStrLn "--------------------------------------------"
+  -- putStrLn ""
   return (newStack, h)
 
 

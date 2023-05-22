@@ -80,15 +80,6 @@ instance
       <*> (sample $ LinearHypParams dev True wordDim numWords)
       <*> (sample $ LinearHypParams dev True wordDim numActions)
 
-
-{-
-
-  Data Structure for RNNG
-
--}
-
-
-
 -- instance Show RNNGState where
 --   show RNNGState {..} = unlines [
 --       "textStack: " ++ show textStack,
@@ -96,6 +87,14 @@ instance
 --       "textActionHistory: " ++ show textActionHistory,
 --       "numOpenParen: " ++ show numOpenParen
 --     ]
+
+
+{-
+
+  Data Structure for RNNG
+
+-}
+
 
 rnngForward ::
   Mode ->
@@ -105,9 +104,7 @@ rnngForward ::
   [[Int]] ->
   -- | loss, action loss, word loss
   (Tensor, Tensor, Tensor)
-rnngForward mode@Mode{..} model@RNNG{..} indexData@IndexData{..} sents' actions' = unsafePerformIO $ do
-  let actions = map (take 13) actions'
-      sents = map (take 3) sents'
+rnngForward mode@Mode{..} model@RNNG{..} indexData@IndexData{..} sents actions = unsafePerformIO $ do
   -- initialize
   let sentsIdxTensor = toDevice device $ asTensor sents
       wordVecs = embedding'' wordEmbedding dropoutProb sentsIdxTensor
@@ -128,13 +125,7 @@ rnngForward mode@Mode{..} model@RNNG{..} indexData@IndexData{..} sents' actions'
       aLoss = actionLoss model actionIdxTensor actionContexts
       wLoss = wordLoss model indexData sentsIdxTensor actionIdxTensor actionContexts
       loss = (Torch.sumAll aLoss) + (Torch.sumAll wLoss)
-  putStrLn $ "aLoss: " ++ show aLoss
-  putStrLn $ "wLoss: " ++ show wLoss
-  putStrLn $ "Loss: " ++ show loss
-  putStrLn "+++++++++++++++++++++++++++++++++++++++++++++"
-  putStrLn ""  
   return (loss, aLoss, wLoss)
-
 
 actionLoss ::
   RNNG ->
@@ -168,7 +159,6 @@ wordLoss RNNG{..} IndexData{..} x actions hiddens =
       actionMask = actions' ==. (asTensor' (actionIndexFor SHIFT) (withDevice (Torch.device actions) defaultOpts))
       idx = squeezeDim 1 $ nonzero actionMask
       shiftHiddens = hiddens' ! idx
-
       x' = view [-1] x
       nonPadX = x' ! (x' /=. 1)
       logit = linearLayer vocabMLP shiftHiddens

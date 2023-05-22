@@ -38,7 +38,6 @@ library
       Model.Generative.MultiLayerLSTMCell
       Model.Generative.RNNG
       Model.Generative.RNNGCell
-      Model.Generative.RNNGState
       Model.RNNG
       Train.File
       Util

@@ -33,7 +33,6 @@ data MultiLayerLSTMCell where
     MultiLayerLSTMCell
   deriving (Show, Generic, Parameterized)
 
-
 instance
   Randomizable
     MultiLayerLSTMCellSpec
@@ -41,6 +40,7 @@ instance
   where
     sample MultiLayerLSTMCellSpec {..} = MultiLayerLSTMCell
       <$> (sample $ LstmHypParams dev False inputDim hiddenDim numLayers True Nothing)
+
 
 -- TODO: pytorchと同じく<bSize,numLayers,hDim>にする
 multiLayerLSTMCellForward ::
@@ -61,4 +61,3 @@ multiLayerLSTMCellForward MultiLayerLSTMCell{..} dropout prevHC input =
                     Nothing -> (zeros [numLayers, batchSize, hiddenDim] (withDevice (device input) defaultOpts), zeros [numLayers, batchSize, hiddenDim] (withDevice (device input) defaultOpts))
       (h, c) = snd $ lstmLayers lstm dropout True prev (unsqueeze (Dim 1) input)
   in (transpose (Dim 0) (Dim 1) h, transpose (Dim 0) (Dim 1) c)
-

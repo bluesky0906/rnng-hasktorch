@@ -34,14 +34,11 @@ data LSTMComposition where
   LSTMComposition ::
     {
       lstm :: LstmParams,
-      linear :: LinearParams
-      -- h0 :: Parameter,
-      -- c0 :: Parameter
-      -- batchIndex :: Tensor
+      linear :: LinearParams,
+      batchIndex :: Tensor
     } ->
     LSTMComposition
   deriving (Show, Generic, Parameterized)
-
 
 instance
   Randomizable
@@ -51,9 +48,8 @@ instance
     sample LSTMCompositionSpec {..} = LSTMComposition
       <$> (sample $ LstmHypParams dev True dim dim numLayers True Nothing)
       <*> (sample $ LinearHypParams dev True (dim * 2) dim)
-      -- <*> (makeIndependent =<< zeros [2 * numLayers, batchSize, hiddenDim] (withDevice dev defaultOpts))
-      -- <*> (makeIndependent =<< zeros [2 * numLayers, batchSize, hiddenDim] (withDevice dev defaultOpts))
-      -- <*> (return $ arange 0 10000 1 (withDType Int64 $ withDevice dev defaultOpts))
+      <*> (return $ arange 0 10000 1 (withDType Int64 $ withDevice dev defaultOpts))
+
 
 lstmCompositionForward ::
   LSTMComposition ->
@@ -69,8 +65,7 @@ lstmCompositionForward ::
   -- | <numReduce, wDim>
   Tensor
 lstmCompositionForward LSTMComposition{..} dropoutProb children chLengths nt ntId =
-  let batchIndex = arange 0 10000 1 (withDType Int64 $ withDevice (device children) defaultOpts)
-      batchSize = size 0 children
+  let batchSize = size 0 children
       numLayers = length (restLstmParams lstm) + 1
       (hiddenDim:_) = shape $ toDependent $ Torch.Layer.Linear.weight $ forgetGate $ firstLstmParams lstm
       dev = device children
@@ -90,4 +85,3 @@ lstmCompositionForward LSTMComposition{..} dropoutProb children chLengths nt ntI
                       Nothing -> id
       output = relu $ linearLayer linear $ dropoutLayer c -- <numReduce, wDim>
   in output
-

@@ -30,7 +30,6 @@ data Embedding where
     Embedding
   deriving (Show, Generic, Parameterized)
 
-
 instance
   Randomizable
     EmbeddingSpec
@@ -38,6 +37,7 @@ instance
   where
     sample EmbeddingSpec {..} = Embedding
       <$> (makeIndependent =<< randnIO' [numEmbed, dim])
+
 
 embedding'' ::
   Embedding ->
@@ -49,5 +49,3 @@ embedding'' Embedding{..} dropoutProb idxTensor =
   where 
     dropoutLayer (Just prob) = unsafePerformIO . (dropout prob False)
     dropoutLayer Nothing = id
-  
-
