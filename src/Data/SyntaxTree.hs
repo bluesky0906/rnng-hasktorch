@@ -1,5 +1,6 @@
 {-#  LANGUAGE DeriveGeneric #-}
 
+-- TODO:: library名再考（Treebankファイルを扱うための関数も含む）
 module Data.SyntaxTree where
 import Data.RNNGSentence
 import GHC.Generics
@@ -7,6 +8,9 @@ import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
 import qualified Data.Aeson            as A --aeson
 import Data.List as L
+import Text.Directory (getFileList) --nlp-tools
+import System.Directory (doesFileExist) --directory
+import System.FilePath.Posix (takeBaseName) --filepath
 
 data Tree = 
   Phrase (T.Text, [Tree]) 
@@ -14,9 +18,13 @@ data Tree =
   | Err String T.Text 
   deriving (Eq, Generic)
 
+instance Show Tree where
+  show tree = T.unpack $ formatSyntaxTree 0 tree
+
 instance A.FromJSON Tree
 instance A.ToJSON Tree
 
+data Grammar = CFG | CCG deriving (Show, Read)
 
 isErr :: 
   Tree -> 
@@ -72,10 +80,6 @@ toRNNGSentence posMode (RNNGSentence (words, actions)) (Phrase (label, trees)) =
     RNNGSentence (newWords, newActions) = L.foldl (toRNNGSentence posMode) (RNNGSentence (words, NT label:actions)) trees
 toRNNGSentence _ (RNNGSentence (words, actions)) (Err message text)  = RNNGSentence (words, ERROR:actions)
 
-
-instance Show Tree where
-  show cfgTree = T.unpack $ formatSyntaxTree 0 cfgTree
-
 formatSyntaxTree ::
   Int ->
   Tree ->
@@ -102,3 +106,61 @@ formatSyntaxTree depth (Err msg text) =
     T.pack $ "Parse Error: " ++ msg ++ " in ",
     text
   ]
+
+-- 評価のために()を<>に置き換え
+replaceBrackets ::
+  T.Text ->
+  T.Text 
+replaceBrackets =
+  T.pack . (T.foldr replaceBracket "")
+  where
+    replaceBracket '(' acc = '<':acc
+    replaceBracket ')' acc = '>':acc
+    replaceBracket x acc = x:acc
+
+
+evalFormat ::
+  Bool ->
+  Tree ->
+  T.Text
+evalFormat posMode (Phrase (label, tree)) =
+  T.concat [
+    T.pack " ",
+    T.pack "(", 
+    replaceBrackets label,
+    T.concat $ map (evalFormat posMode) tree,
+    T.pack ")"
+  ]
+evalFormat True (Word word) =
+  T.concat [
+    T.pack " ",
+    word
+  ]
+evalFormat False (Word word) =
+  T.concat [
+    T.pack " ",
+    T.pack "(WORD ",
+    word,
+    T.pack ")"
+  ]
+
+listFiles ::
+  Grammar ->
+  String ->
+  IO [String]
+listFiles grammar p = do
+  let suffix = case grammar of
+                CFG -> "mrg"
+                CCG -> "auto"
+  isFile <- doesFileExist p
+  if isFile then return [p] else getFileList suffix p
+
+treefiles ::
+  Grammar ->
+  [FilePath] -> 
+  IO [FilePath]
+treefiles grammar dirsPath = do
+  -- 指定されたディレクトリ以下のファイルを取得
+  filePaths <- concat <$> traverse (listFiles grammar) dirsPath
+  --readmeは除外
+  return $ filter (\f -> takeBaseName f /= "readme") filePaths
