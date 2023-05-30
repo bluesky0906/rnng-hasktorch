@@ -8,7 +8,7 @@ import Data.RNNGSentence
 import Data.SyntaxTree
 import Data.CCG
 import Util
-import Train.File
+import Util.File
 import Torch hiding (foldLoop, take, repeat, RuntimeMode)
 -- | hasktorch-tools
 import Torch.Control (mapAccumM, makeBatch)
@@ -326,7 +326,7 @@ main = do
   let resultFileName = "reports/" ++ modelName ++ "-" ++ show parsingMode ++ "-result.txt"
   withFile resultFileName WriteMode $ \handle -> do
     -- | ちゃんと木になってる予測を抜き出してくる
-    let predictedRNNGSentences = zipWith (curry insertDifferentActions) evaluationData evaluationPrediction
+    let predictedRNNGSentences = zipWith insertDifferentActions evaluationData evaluationPrediction
         predictionTrees = fromRNNGSentences predictedRNNGSentences
         correctTrees = fromRNNGSentences evaluationData
         validTreeMask = map (not . isErr) predictionTrees
