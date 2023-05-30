@@ -7,9 +7,8 @@ import Util (dataFilePath)
 import Options.Applicative
 import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
-import System.FilePath.Posix (takeBaseName) --filepath
-import Text.Directory (checkFile, getFileList) --nlp-tools
-import System.Directory (doesDirectoryExist, doesFileExist, listDirectory) --directory
+import Text.Directory (checkFile) --nlp-tools
+import System.Directory (doesDirectoryExist, listDirectory) --directory
 
 {-
 
@@ -37,17 +36,6 @@ opts = info (preprocess <**> helper)
   <> progDesc "Grammar used by RNNG" 
   )
 
-listFiles ::
-  Grammar ->
-  String ->
-  IO [String]
-listFiles grammar p = do
-  let suffix = case grammar of
-                CFG -> "mrg"
-                CCG -> "auto"
-  isFile <- doesFileExist p
-  if isFile then return [p] else getFileList suffix p
-
 saveActionData ::
   Grammar ->
   Bool ->
@@ -56,15 +44,13 @@ saveActionData ::
   IO()
 saveActionData grammar posMode dirsPath outputPath = do
   -- 指定されたディレクトリ以下のファイルを取得
-  filePaths <- concat <$> traverse (listFiles grammar) dirsPath
-  --readmeは除外
-  treess <- mapM (parseTreefile grammar) $ filter (\f -> takeBaseName f /= "readme") filePaths
+  filePaths <- treefiles grammar dirsPath
+  treess <- mapM (parseTreefile grammar) filePaths
   let trees = concat treess
       parsedTrees = filter (not . isErr) $ trees
   mapM_ print $ filter isErr $ trees
   let rnngSentences = toRNNGSentences posMode parsedTrees
   saveActionsToBinary outputPath rnngSentences
-  -- content <- loadActionsFromBinary outputPath
   return ()
   where
     parseTreefile CFG = parseCFGfile

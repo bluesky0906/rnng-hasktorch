@@ -16,8 +16,6 @@ import Data.Store --seralisation
 import ML.Util.Dict (sortWords)
 
 
-data Grammar = CFG | CCG deriving (Show, Read)
-
 
 data Action = NT T.Text | SHIFT | REDUCE | ERROR deriving (Eq, Show, Generic, Ord)
 type Sentence = [T.Text]
@@ -38,8 +36,8 @@ instance Store RNNGSentence
 instance A.FromJSON RNNGSentence
 instance A.ToJSON RNNGSentence
 
-insertDifferentActions :: (RNNGSentence, [Action]) -> RNNGSentence
-insertDifferentActions (RNNGSentence (words, _), prediction) = RNNGSentence (words, prediction)
+insertDifferentActions :: RNNGSentence -> [Action] -> RNNGSentence
+insertDifferentActions (RNNGSentence (words, _)) prediction = RNNGSentence (words, prediction)
 
 reverseRNNGSentence :: RNNGSentence -> RNNGSentence
 reverseRNNGSentence (RNNGSentence (words, actions)) = RNNGSentence ((reverse words), (reverse actions))

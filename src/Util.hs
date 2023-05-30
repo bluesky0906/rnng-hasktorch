@@ -8,7 +8,6 @@ import qualified Data.Map.Strict as M
 import Data.List.Split (chunksOf, splitEvery) --split
 import Data.List as L
 import Data.Ord
-import System.Directory (doesFileExist)
 import System.Directory.ProjectRoot (getProjectRootWeightedCurrent)
 import System.Random
 import Dhall hiding ( map )
@@ -101,25 +100,12 @@ for Config file
 
 data DataType = Train | Eval | Valid 
 
-dataFilePath ::
-  -- | grammar
-  String ->
-  -- | pos mode
-  Bool ->
-  -- | train, eval, valid
-  (String, String, String)
-dataFilePath grammar posMode = 
-  ("data/training" ++ suffix, "data/evaluation" ++ suffix, "data/validation" ++ suffix)
-  where
-    suffix = grammar ++ if posMode then "POS" else ""
-
 getProjectRoot :: IO String
 getProjectRoot = do
   projectRoot <- getProjectRootWeightedCurrent
   return (case projectRoot of
                 Nothing -> "./"
                 Just a -> a)
-
 
 modelNameConfig ::
   -- | overwrite
