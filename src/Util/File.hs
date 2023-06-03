@@ -71,7 +71,7 @@ parserEvalFilePath modelName grammar posMode = do
 
 dataFilePath ::
   -- | grammar
-  String ->
+  Grammar ->
   -- | pos mode
   Bool ->
   -- | train, eval, valid
@@ -79,6 +79,6 @@ dataFilePath ::
 dataFilePath grammar posMode = 
   ("data/training" ++ suffix, "data/evaluation" ++ suffix, "data/validation" ++ suffix)
   where
-    suffix = grammar ++ if posMode then "POS" else ""
+    suffix = show grammar ++ if posMode then "POS" else ""
 
 

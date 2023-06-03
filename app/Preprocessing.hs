@@ -3,7 +3,7 @@ import Data.SyntaxTree
 import Data.CFG
 import Data.CCG
 import Data.RNNGSentence
-import Util (dataFilePath)
+import Util.File (dataFilePath)
 import Options.Applicative
 import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
@@ -66,7 +66,7 @@ main = do
       trainingDataDirs = fmap (wsjDirPath ++) ["02/", "03/", "04/", "05/", "06/", "07/", "08/", "09/", "10/", "11/", "12/", "13/", "14/", "15/", "16/", "17/", "18/", "19/", "20/", "21/"]
       validationDataDirs = fmap (wsjDirPath ++) ["24/"]
       evaluationDataDirs = fmap (wsjDirPath ++) ["23/"]
-      (trainDataPath, evalDataPath, validDataPath) = dataFilePath (show rnngGrammar) posMode
+      (trainDataPath, evalDataPath, validDataPath) = dataFilePath rnngGrammar posMode
   saveActionData rnngGrammar posMode trainingDataDirs trainDataPath
   saveActionData rnngGrammar posMode evaluationDataDirs evalDataPath
   saveActionData rnngGrammar posMode validationDataDirs validDataPath

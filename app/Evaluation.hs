@@ -82,7 +82,7 @@ main = do
   
   let modelFilePath = modelPath modelName
       modelSpecPath = specPath modelName
-      (trainDataPath, evalDataPath, validDataPath) = dataFilePath (show grammarOpt) posOpt
+      (trainDataPath, evalDataPath, validDataPath) = dataFilePath grammarOpt posOpt
   rnngSpec <- B.decodeFile modelSpecPath::(IO RNNGSpec)
   rnngModel <- Torch.Train.loadParams rnngSpec modelFilePath
 
@@ -101,7 +101,8 @@ main = do
                   device = modelDevice rnngSpec,
                   parsingMode = All,
                   dropoutProb = Nothing,
-                  posMode = modelPosMode rnngSpec
+                  posMode = modelPosMode rnngSpec,
+                  grammarMode = grammarOpt
                 }
   let predictedActions = map (predictActions mode rnngModel indexData) evaluationData
       predictedRNNGSentences = zipWith insertDifferentActions evaluationData predictedActions
