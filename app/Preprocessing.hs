@@ -3,7 +3,7 @@ import Data.SyntaxTree
 import Data.CFG
 import Data.CCG
 import Data.RNNGSentence
-import Util (dataFilePath)
+import Util.File (dataFilePath)
 import Options.Applicative
 import qualified Data.Text as T          --text
 import qualified Data.Text.IO as T       --text
