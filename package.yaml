@@ -19,7 +19,7 @@ extra-source-files:
 # common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/githubuser/rnng-hasktorch#readme>
 
-dependencies:
+dependencies:zw
 - base >= 4.7 && < 5
 - text
 - parsec
@@ -58,6 +58,18 @@ executables:
     - -main-is Preprocessing
     dependencies:
     - rnng-hasktorch
+  typed-rnng:
+    main:                RNNG.hs
+    other-modules:       []
+    source-dirs:         app/typed
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -main-is RNNG
+    dependencies:
+    - rnng-hasktorch
+
 
   Evaluation:
     main:                Evaluation.hs
