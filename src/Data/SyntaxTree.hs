@@ -24,7 +24,7 @@ instance Show Tree where
 instance A.FromJSON Tree
 instance A.ToJSON Tree
 
-data Grammar = CFG | CCG deriving (Show, Read)
+data Grammar = CFG | CCG deriving (Show, Read, Eq)
 
 isErr :: 
   Tree -> 

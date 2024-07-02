@@ -171,7 +171,7 @@ training mode@Mode{..} TrainingConfig{..} (rnng, optim) IndexData {..} (training
       putStrLn $ "#" ++ show idx 
       putStrLn $ "Training Loss: " ++ show trainingLoss
 
-      (validationLoss, validationPrediction) <- evaluate (Mode device Nothing parsingMode posMode) batchRNNG' IndexData {..}  validationData
+      (validationLoss, validationPrediction) <- evaluate (Mode device Nothing parsingMode posMode grammarMode) batchRNNG' IndexData {..}  validationData
       putStrLn $ "Validation Loss(To not be any help): " ++ show validationLoss
       sampledData <- sampleRandomData 5 (zip validationData validationPrediction)
       putStr $ unlines $ map (uncurry showResult) sampledData
@@ -227,7 +227,7 @@ main = do
   putStrLn "======================================"
   let mode = modeConfig config
       posMode = posModeConfig config
-      grammarMode = grammarModeConfig config
+      grammarMode = if grammarModeConfig config == "CCG" then CCG else CFG
       parsingMode = case parsingModeConfig config of 
                       "Point" -> Point
                       "All" -> All
@@ -287,7 +287,8 @@ main = do
                       device = device,
                       parsingMode = Point,
                       dropoutProb = Just 0.2,
-                      posMode = posMode
+                      posMode = posMode,
+                      grammarMode = grammarMode
                     }
     (trained, losses) <- training mode trainingConfig (initRNNGModel, optim) indexData (trainingData, validationData)
 
@@ -318,7 +319,8 @@ main = do
                     device = modelDevice rnngSpec,
                     parsingMode = parsingMode,
                     dropoutProb = Nothing,
-                    posMode = modelPosMode rnngSpec
+                    posMode = modelPosMode rnngSpec,
+                    grammarMode = grammarMode
                   }
   (_, evaluationPrediction) <- evaluate mode rnngModel indexData evaluationData
 
@@ -335,7 +337,7 @@ main = do
     hPrint handle $ length $ filterByMask predictionTrees validTreeMask
 
     -- | CCGの時はちゃんとCCGになってる木を取り出してくる
-    let checkedValidCCG = if grammarMode == "CCG" && posMode
+    let checkedValidCCG = if grammarMode == CCG && posMode
                             then map checkValidCCG predictionTrees
                             else replicate (length predictionTrees) (Left "CFG or not including pos")
 

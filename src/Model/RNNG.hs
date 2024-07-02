@@ -8,6 +8,7 @@
 module Model.RNNG where
 import Data.CFG
 import Data.RNNGSentence
+import Data.SyntaxTree
 import Torch hiding (take)
 -- | hasktorch-tools
 import Torch.Layer.RNN (RnnHypParams(..), RnnParams, rnnLayers)
@@ -197,7 +198,9 @@ data RNNGState where
       hiddenActionHistory :: Tensor,
 
       -- | 開いているNTの数
-      numOpenParen :: Int
+      numOpenParen :: Int,
+      -- | 開いているNTの位置
+      openParenIdx :: Int
     } ->
     RNNGState 
 
@@ -206,7 +209,8 @@ instance Show RNNGState where
       "textStack: " ++ show textStack,
       "textBuffer: " ++ show textBuffer,
       "textActionHistory: " ++ show textActionHistory,
-      "numOpenParen: " ++ show numOpenParen
+      "numOpenParen: " ++ show numOpenParen,
+      "openParenIdx: " ++ show openParenIdx
     ]
 
 data Mode where
@@ -215,7 +219,8 @@ data Mode where
       device :: Device,
       dropoutProb :: Maybe Double,
       parsingMode :: ParsingMode,
-      posMode :: Bool
+      posMode :: Bool,
+      grammarMode :: Grammar
     } ->
     Mode
 
@@ -232,9 +237,11 @@ checkNTForbidden ::
 checkNTForbidden Mode{..} RNNGState {..} =
   numOpenParen > 100 -- 開いているNTが多すぎる時
   || null textBuffer-- 単語が残っていない時
+  || (not (numOpenParen == 1 && not (null textBuffer)) && grammarMode == CCG && posMode && openParenIdx > 1)
   || if posMode 
       then not (null textActionHistory) && (head textActionHistory == SHIFT) -- 1番初めではなくて、前のアクションがSHIFTの時
       else False
+  
 
 checkREDUCEForbidden ::
   Mode ->
@@ -256,6 +263,7 @@ checkSHIFTForbidden ::
 checkSHIFTForbidden Mode{..} RNNGState{..} =
   null textStack -- first action must be NT
   || null textBuffer -- Buffer isn't empty
+  || (grammarMode == CCG && posMode && openParenIdx > 1)
   || if posMode && not (null textStack)
       then (previousAction == SHIFT) || (previousAction == REDUCE) || (previousAction == ERROR) -- SHIFT only after NT
       else False
@@ -367,7 +375,8 @@ parse mode@Mode {..} (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} (NT
       actionHistory = action_embedding:actionHistory,
       textActionHistory = textAction:textActionHistory,
       hiddenActionHistory = actionRNNForward mode actionRNN hiddenActionHistory [action_embedding],
-      numOpenParen = numOpenParen + 1
+      numOpenParen = numOpenParen + 1,
+      openParenIdx = 0
     }
 parse mode@Mode {..} (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHIFT =
   let textAction = SHIFT
@@ -381,17 +390,20 @@ parse mode@Mode {..} (RNNG _ ParseRNNG {..} _) IndexData {..} RNNGState {..} SHI
       actionHistory = action_embedding:actionHistory,
       textActionHistory = textAction:textActionHistory,
       hiddenActionHistory = actionRNNForward mode actionRNN hiddenActionHistory [action_embedding],
-      numOpenParen = numOpenParen
+      numOpenParen = numOpenParen,
+      openParenIdx = openParenIdx + 1
     }
 parse mode@Mode {..} (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGState {..} REDUCE =
   let textAction = REDUCE
       action_embedding = embedding' (toDependent actionEmbedding) ((toDevice device . asTensor . actionIndexFor) textAction)
-      -- | 開いたlabelのidxを特定する
-      (Just idx) = findIndex (\elem -> T.isPrefixOf (T.pack "<") elem && not (T.isSuffixOf (T.pack ">") elem)) textStack
       -- | popする
-      (textSubTree, newTextStack) = splitAt (idx + 1) textStack
-      (subTree, newStack) = splitAt (idx + 1) stack
-      (_, newHiddenStack) = splitAt (idx + 1) hiddenStack
+      (textSubTree, newTextStack) = splitAt (openParenIdx + 1) textStack
+      (subTree, newStack) = splitAt (openParenIdx + 1) stack
+      (_, newHiddenStack) = splitAt (openParenIdx + 1) hiddenStack
+      -- | 開いたlabelのidxを特定する
+      idx = case findIndex (\elem -> T.isPrefixOf (T.pack "<") elem && not (T.isSuffixOf (T.pack ">") elem)) newTextStack of
+              Just i -> i + 1
+              Nothing -> -1
       label = last subTree
       words = tail subTree
       -- composeする
@@ -409,7 +421,8 @@ parse mode@Mode {..} (RNNG _ ParseRNNG {..} CompRNNG {..}) IndexData {..} RNNGSt
       actionHistory = action_embedding:actionHistory,
       textActionHistory = textAction:textActionHistory,
       hiddenActionHistory = actionRNNForward mode actionRNN hiddenActionHistory [action_embedding],
-      numOpenParen = numOpenParen - 1
+      numOpenParen = numOpenParen - 1,
+      openParenIdx = idx
     }
 
 predict ::
@@ -424,13 +437,13 @@ predict ::
   RNNGState ->
   -- | (predicted actions, new rnngState)
   ([Tensor], RNNGState)
-predict mode@(Mode _ _ Point _) _ _ [] results rnngState = (reverse results, rnngState)
-predict mode@(Mode _ _ Point _) rnng indexData (action:rest) predictionHitory rnngState =
+predict mode@(Mode _ _ Point _ _) _ _ [] results rnngState = (reverse results, rnngState)
+predict mode@(Mode _ _ Point _ _) rnng indexData (action:rest) predictionHitory rnngState =
   let prediction = predictNextAction mode rnng rnngState indexData
       newRNNGState = parse mode rnng indexData rnngState action
   in predict mode rnng indexData rest (prediction:predictionHitory) newRNNGState
 
-predict mode@(Mode _ _ All _) rnng IndexData {..} _ predictionHitory RNNGState {..} =
+predict mode@(Mode _ _ All _ _) rnng IndexData {..} _ predictionHitory RNNGState {..} =
   if (length textStack == 1) && (length textBuffer == 0)
     then (reverse predictionHitory, RNNGState {..} )
   else
@@ -458,6 +471,7 @@ rnngForward mode@Mode{..} (RNNG predictActionRNNG ParseRNNG {..} compRNNG) Index
         actionHistory = [toDependent actionStart],
         textActionHistory = [],
         hiddenActionHistory = actionRNNForward mode actionRNN (toDependent actionh0) [(toDependent actionStart)],
-        numOpenParen = 0
+        numOpenParen = 0,
+        openParenIdx = -1
       }
   in fst $ predict mode (RNNG predictActionRNNG ParseRNNG {..} compRNNG) IndexData {..} actions [] initRNNGState
